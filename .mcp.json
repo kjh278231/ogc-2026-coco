@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "ogc2026-db": {
+      "command": "py",
+      "args": [
+        "-3.12",
+        "tools/run_sqlite_mcp.py",
+        "--db-path",
+        "tools/ogc2026_runs.db"
+      ],
+      "description": "Read/query access to the OGC2026 eval results SQLite DB (runs, instance_results, events). Provided by the upstream `mcp-server-sqlite` PyPI package via tools/run_sqlite_mcp.py."
+    }
+  }
+}
