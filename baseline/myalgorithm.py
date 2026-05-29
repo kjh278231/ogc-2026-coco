@@ -47,10 +47,20 @@ def precompute_obbs(prob_info):
 
 def get_world_obb(block):
     """Retrieve the world-coordinate OBB for a placed block by translating its cached local OBB."""
-    local_obb = obb_cache.get((block.block_id, block.orient_idx))
-    if local_obb is None:
-        return None
-    return translate(local_obb, block.x, block.y)
+    if not hasattr(block, "_world_obb"):
+        local_obb = obb_cache.get((block.block_id, block.orient_idx))
+        if local_obb is None:
+            block._world_obb = None
+        else:
+            block._world_obb = translate(local_obb, block.x, block.y)
+    return block._world_obb
+
+def get_world_polys(block):
+    """Retrieve or compute the world-coordinate Shapely Polygons for each layer of the block."""
+    if not hasattr(block, "_world_polys"):
+        layers = block.layers_at_pos()
+        block._world_polys = [utils._poly_from_verts(layer) for layer in layers]
+    return block._world_polys
 
 # -----------------------------------------------------------------------------
 # 1. Future EXIT Blocking Prevention Slot Finder (Crane Constraint-Aware)
@@ -130,10 +140,10 @@ def custom_check_entry(bay, blocks, new_block, fast=False):
     if not bay.contains_block(new_block):
         return original_check_entry(bay, blocks, new_block, fast)
         
-    new_layers = new_block.layers_at_pos()
     new_bbox   = new_block.bounding_rect()
-    n_new      = len(new_layers)
     new_obb    = get_world_obb(new_block)
+    new_polys  = get_world_polys(new_block)
+    n_new      = len(new_polys)
     
     results = []
     for exist in blocks:
@@ -148,15 +158,14 @@ def custom_check_entry(bay, blocks, new_block, fast=False):
                 continue
                 
         # Stage 3: Full Polygon Check
-        exist_layers = exist.layers_at_pos()
-        n_exist      = len(exist_layers)
-        new_polys = [utils._poly_from_verts(new_layers[k]) for k in range(n_new)]
+        exist_polys = get_world_polys(exist)
+        n_exist     = len(exist_polys)
         for k in range(n_new):
             poly_new = new_polys[k]
             if poly_new is None:
                 continue
             for j in range(k, n_exist):
-                poly_exist = utils._poly_from_verts(exist_layers[j])
+                poly_exist = exist_polys[j]
                 if poly_exist is None:
                     continue
                 try:
@@ -176,14 +185,12 @@ def custom_check_entry(bay, blocks, new_block, fast=False):
     return results
 
 def custom_check_exit(bay, blocks, target_block, fast=False):
-    target_layers = target_block.layers_at_pos()
     target_bbox   = target_block.bounding_rect()
-    n_target      = len(target_layers)
     target_obb    = get_world_obb(target_block)
+    target_polys  = get_world_polys(target_block)
+    n_target      = len(target_polys)
     
     results = []
-    target_polys = [utils._poly_from_verts(target_layers[k]) for k in range(n_target)]
-    
     for exist in blocks:
         if exist.block_id == target_block.block_id:
             continue
@@ -199,14 +206,14 @@ def custom_check_exit(bay, blocks, target_block, fast=False):
                 continue
                 
         # Stage 3: Full Polygon Check
-        exist_layers = exist.layers_at_pos()
-        n_exist      = len(exist_layers)
+        exist_polys = get_world_polys(exist)
+        n_exist     = len(exist_polys)
         for k in range(n_target):
             poly_target = target_polys[k]
             if poly_target is None:
                 continue
             for j in range(k, n_exist):
-                poly_exist = utils._poly_from_verts(exist_layers[j])
+                poly_exist = exist_polys[j]
                 if poly_exist is None:
                     continue
                 try:
@@ -229,7 +236,6 @@ def custom_check_collisions(bay, blocks, layer_indices=None):
     results = []
     n = len(blocks)
     bboxes = [b.bounding_rect() for b in blocks]
-    all_layers = [b.layers_at_pos() for b in blocks]
     obbs = [get_world_obb(b) for b in blocks]
     
     for i in range(n):
@@ -248,14 +254,14 @@ def custom_check_collisions(bay, blocks, layer_indices=None):
             # Stage 3: Full Polygon Check
             ba = blocks[i]
             bb = blocks[j]
-            layers_a = all_layers[i]
-            layers_b = all_layers[j]
+            polys_a = get_world_polys(ba)
+            polys_b = get_world_polys(bb)
             
-            for k in range(min(len(layers_a), len(layers_b))):
+            for k in range(min(len(polys_a), len(polys_b))):
                 if layer_indices is not None and k not in layer_indices:
                     continue
-                poly_a = utils._poly_from_verts(layers_a[k])
-                poly_b = utils._poly_from_verts(layers_b[k])
+                poly_a = polys_a[k]
+                poly_b = polys_b[k]
                 if poly_a is None or poly_b is None:
                     continue
                 try:
@@ -416,16 +422,23 @@ def algorithm(prob_info, timelimit=60):
         return res, final_sol
 
     # 4. Evaluate the entire portfolio and pick the best initial heuristic
-    print("[Custom-SA] Evaluating algorithm portfolio of 12 scheduling/packing heuristics...")
+    # To keep execution super fast and leave maximum time for Simulated Annealing,
+    # we only evaluate EDD and SlackRatio as initial heuristics.
+    target_heuristics = ["EDD", "SlackRatio"]
+    print(f"[Custom-SA] Evaluating selected heuristics {target_heuristics}...")
     best_obj = float("inf")
     best_sol = None
     best_perm = None
     best_heur_name = "None"
     
-    # We run the initial portfolio in silent mode to be as fast as possible
+    # We allocate a reasonable portion of the timelimit to check each heuristic
+    init_check_limit = max(0.5, timelimit * 0.15)
     with silence_stdout():
-        for name, perm in heuristics.items():
-            res, sol = evaluate_permutation(perm, 5) # brief time for initial check
+        for name in target_heuristics:
+            if name not in heuristics:
+                continue
+            perm = heuristics[name]
+            res, sol = evaluate_permutation(perm, init_check_limit) # brief time for initial check
             if res["feasible"]:
                 obj = res["objective"]
                 if obj < best_obj:
