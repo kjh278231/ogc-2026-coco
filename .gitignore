@@ -1,0 +1,21 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Vendored dependency shim (Python 3.12 cp312 wheels for shapely/numpy)
+.codex_deps/
+
+# Local debug artifacts from tools/geometry_debug.py
+tools/debug_dumps/
+
+# Per-user Claude Code permissions
+.claude/settings.local.json
+
+# Claude Code scratchpad (hypothesis history, verdicts — useful for the
+# strategist/gate's running memory but not historically interesting)
+.claude/scratch/
+
+# Ad-hoc result dumps from manual evaluate_all.py runs
+results_*.json
