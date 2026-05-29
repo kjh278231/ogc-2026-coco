@@ -6,6 +6,7 @@ import time
 import random
 import math
 import contextlib
+import json
 import os
 import sys
 
@@ -19,6 +20,46 @@ import baseline_greedy
 import utils
 from utils import check_feasibility, Bay, Block
 
+# -----------------------------------------------------------------------------
+# Structured JSONL event log (optional). Enabled when the OGC2026_EVENT_LOG
+# environment variable is set to a file path; otherwise every emit is a no-op.
+# Used by tools/eval_runner.py to capture a parseable trace per (run, instance).
+# -----------------------------------------------------------------------------
+
+_event_log_fh = None
+_event_log_t0 = None
+
+def _init_event_log(t0: float) -> None:
+    global _event_log_fh, _event_log_t0
+    _event_log_t0 = t0
+    path = os.environ.get("OGC2026_EVENT_LOG")
+    if not path:
+        _event_log_fh = None
+        return
+    try:
+        _event_log_fh = open(path, "a", buffering=1, encoding="utf-8")
+    except Exception:
+        _event_log_fh = None
+
+def _close_event_log() -> None:
+    global _event_log_fh
+    if _event_log_fh is not None:
+        try:
+            _event_log_fh.close()
+        except Exception:
+            pass
+        _event_log_fh = None
+
+def _emit(event: str, **payload) -> None:
+    if _event_log_fh is None:
+        return
+    try:
+        rec = {"t": round(time.time() - _event_log_t0, 4), "event": event}
+        rec.update(payload)
+        _event_log_fh.write(json.dumps(rec, default=str) + "\n")
+    except Exception:
+        pass
+
 # Save original check and utility functions for fallback/final verification
 original_check_entry = utils.check_entry
 original_check_exit = utils.check_exit
@@ -27,11 +68,17 @@ original_find_earliest_slot = baseline_greedy._find_earliest_slot
 
 # Global OBB cache: (block_id, orient_idx) -> local OBB (Shapely Polygon)
 obb_cache = {}
+# Global per-layer local polygon cache: (block_id, orient_idx) -> list[Polygon|None]
+# Each entry is the layer's Shapely Polygon in ref-centered local coordinates,
+# so world polys are obtained by a cheap affine translate(local, block.x, block.y)
+# instead of reconstructing Shapely geometry per new Block instance.
+local_polys_cache = {}
 
 def precompute_obbs(prob_info):
-    """Precompute and cache local OBBs for all block orientations."""
-    global obb_cache
+    """Precompute and cache local OBBs *and* per-layer local polygons for all block orientations."""
+    global obb_cache, local_polys_cache
     obb_cache = {}
+    local_polys_cache = {}
     for bi, blk_data in enumerate(prob_info["blocks"]):
         for oi, orient_data in enumerate(blk_data["shape"]):
             raw_layers = orient_data["layers"]
@@ -39,11 +86,16 @@ def precompute_obbs(prob_info):
             if not layers:
                 continue
             ref_x, ref_y = layers[0][0] if layers[0] else (0.0, 0.0)
-            # Shift all vertices so the reference point is at (0, 0)
-            shifted_verts = [[v[0] - ref_x, v[1] - ref_y] for l in layers for v in l]
+            # Shift every layer so the reference point lands at (0, 0).
+            shifted_layers = [[[v[0] - ref_x, v[1] - ref_y] for v in l] for l in layers]
+            # Per-layer local polygons — reused by get_world_polys via translate.
+            local_polys_cache[(bi, oi)] = [
+                utils._poly_from_verts(layer) for layer in shifted_layers
+            ]
+            # OBB from the union of all layer vertices (same as before).
+            shifted_verts = [v for l in shifted_layers for v in l]
             poly = Polygon(shifted_verts)
-            obb = poly.minimum_rotated_rectangle
-            obb_cache[(bi, oi)] = obb
+            obb_cache[(bi, oi)] = poly.minimum_rotated_rectangle
 
 def get_world_obb(block):
     """Retrieve the world-coordinate OBB for a placed block by translating its cached local OBB."""
@@ -56,10 +108,24 @@ def get_world_obb(block):
     return block._world_obb
 
 def get_world_polys(block):
-    """Retrieve or compute the world-coordinate Shapely Polygons for each layer of the block."""
+    """Retrieve the world-coordinate Shapely Polygons for each layer of the block.
+
+    Prefers translating cached local polys (populated by precompute_obbs) — this
+    skips Shapely Polygon reconstruction for every fresh Block instance created
+    by _place_blocks during SA. Falls back to building from layers_at_pos() if
+    the cache is missing (defensive; should not happen in normal flow).
+    """
     if not hasattr(block, "_world_polys"):
-        layers = block.layers_at_pos()
-        block._world_polys = [utils._poly_from_verts(layer) for layer in layers]
+        local_polys = local_polys_cache.get((block.block_id, block.orient_idx))
+        if local_polys is None:
+            layers = block.layers_at_pos()
+            block._world_polys = [utils._poly_from_verts(layer) for layer in layers]
+        else:
+            bx, by = block.x, block.y
+            block._world_polys = [
+                translate(p, bx, by) if p is not None else None
+                for p in local_polys
+            ]
     return block._world_polys
 
 # -----------------------------------------------------------------------------
@@ -79,6 +145,9 @@ def custom_find_earliest_slot(new_blk: Block,
     candidate_entries = sorted({r_time} | {e for _, e in schedule_in_bay})
 
     for entry_candidate in candidate_entries:
+        if baseline_greedy._active_deadline_reached():
+            return None, None
+
         entry  = max(r_time, entry_candidate)
         exit_t = entry + proc
 
@@ -102,6 +171,8 @@ def custom_find_earliest_slot(new_blk: Block,
         # Check if new_blk blocks the exit of any block exiting between [entry, exit_t)
         future_blocked = False
         for b_other, (a_other, e_other) in zip(placed_in_bay, schedule_in_bay):
+            if baseline_greedy._active_deadline_reached():
+                return None, None
             if entry < e_other < exit_t:
                 # b_other exits while new_blk is already in the bay.
                 # Does new_blk block b_other's exit at e_other?
@@ -115,6 +186,8 @@ def custom_find_earliest_slot(new_blk: Block,
         # Stage-4 pre-check: blocks strictly interior to [entry, exit_t)
         s4_blocked = False
         for b_other, (a_other, e_other) in zip(placed_in_bay, schedule_in_bay):
+            if baseline_greedy._active_deadline_reached():
+                return None, None
             if a_other <= entry or e_other >= exit_t:
                 continue  # handled by Stage-2 or Stage-3 above
             if not baseline_greedy._time_overlaps(entry, exit_t, a_other, e_other):
@@ -147,6 +220,8 @@ def custom_check_entry(bay, blocks, new_block, fast=False):
     
     results = []
     for exist in blocks:
+        if baseline_greedy._active_deadline_reached():
+            return [None]
         # Stage 1: AABB Check
         if not utils._bb_overlap(new_bbox, exist.bounding_rect()):
             continue
@@ -192,6 +267,8 @@ def custom_check_exit(bay, blocks, target_block, fast=False):
     
     results = []
     for exist in blocks:
+        if baseline_greedy._active_deadline_reached():
+            return [None]
         if exist.block_id == target_block.block_id:
             continue
             
@@ -239,7 +316,11 @@ def custom_check_collisions(bay, blocks, layer_indices=None):
     obbs = [get_world_obb(b) for b in blocks]
     
     for i in range(n):
+        if baseline_greedy._active_deadline_reached():
+            return [None]
         for j in range(i + 1, n):
+            if baseline_greedy._active_deadline_reached():
+                return [None]
             # Stage 1: AABB Check
             if not utils._bb_overlap(bboxes[i], bboxes[j]):
                 continue
@@ -300,6 +381,16 @@ def silence_stdout():
 
 def algorithm(prob_info, timelimit=60):
     start_time = time.time()
+    _init_event_log(start_time)
+    _emit("algo.start", timelimit=float(timelimit))
+    hard_deadline = start_time + max(0.0, float(timelimit))
+    safety_margin = min(0.5, max(0.05, float(timelimit) * 0.02))
+
+    def remaining_time(deadline=hard_deadline):
+        return deadline - time.time()
+
+    def make_timeout_result():
+        return {"feasible": False, "stage": "timeout", "objective": float("inf"), "violations": []}
     
     # 1. Precompute OBBs for the problem blocks
     precompute_obbs(prob_info)
@@ -314,10 +405,11 @@ def algorithm(prob_info, timelimit=60):
     blocks_data = prob_info["blocks"]
     n_bays = len(bays_data)
     n_blocks = len(blocks_data)
-    
+
     w1 = prob_info.get("weights", {}).get("w1", 1.0)
     w2 = prob_info.get("weights", {}).get("w2", 1.0)
     w3 = prob_info.get("weights", {}).get("w3", 1.0)
+    _emit("algo.context", n_blocks=n_blocks, n_bays=n_bays, w1=w1, w2=w2, w3=w3)
     
     bays = [Bay.from_dict(d, i) for i, d in enumerate(bays_data)]
     
@@ -394,8 +486,11 @@ def algorithm(prob_info, timelimit=60):
         key=lambda i: (eval_priority_score(i, alpha=0.5, beta=1.0, gamma=1.0), blocks_data[i]["due_date"])
     )
     
-    def evaluate_permutation(perm, search_t_limit):
+    def evaluate_permutation(perm, search_deadline):
         """Constructs a candidate solution and evaluates its feasibility and objective."""
+        if time.time() >= search_deadline:
+            return make_timeout_result(), {"operations": {}}
+
         bay_placed = [[] for _ in range(n_bays)]
         bay_schedule = [[] for _ in range(n_bays)]
         bay_loads = [0.0] * n_bays
@@ -405,40 +500,102 @@ def algorithm(prob_info, timelimit=60):
             perm, blocks_data, bays,
             bay_placed, bay_schedule, bay_loads,
             w1, w2, w3, forced_ids=set(),
-            t_start=time.time(), log_interval=0
+            t_start=time.time(), log_interval=0,
+            deadline=search_deadline
         )
         
         sol = {"operations": baseline_greedy._build_operations(list(assignments.values()))}
-        
+
+        if time.time() >= search_deadline:
+            # _place_blocks finished but there's no time for _repair. The greedy
+            # placement is often already feasible on easier instances — don't
+            # discard it blindly: returning an abstract timeout here causes every
+            # init heuristic to look infeasible, which triggers the much worse
+            # "best_perm is None" fallback (single EDD retry or forced (0,0)
+            # placement). We only run the official scorer when there's enough
+            # hard-deadline slack to absorb its cost (Shapely-heavy on big
+            # instances). For init-phase calls remaining_time is generous
+            # (search_deadline is per-heuristic, far from hard_deadline); for SA
+            # iterations remaining_time is ~safety_margin so we still bail.
+            if remaining_time() > max(2.0, safety_margin * 4):
+                try:
+                    res = check_feasibility(prob_info, sol)
+                except Exception:
+                    res = make_timeout_result()
+            else:
+                res = make_timeout_result()
+            return res, sol
+
         # Repair the solution if there are any violations
+        repair_start = time.time()
         assignments = baseline_greedy._repair(
             prob_info, sol, assignments, bays, blocks_data,
-            w1, w2, w3, time.time(), search_t_limit,
-            repair_mode="greedy"
+            w1, w2, w3, repair_start, max(0.0, search_deadline - repair_start),
+            repair_mode="greedy",
+            deadline=search_deadline
         )
         
         final_sol = {"operations": baseline_greedy._build_operations(list(assignments.values()))}
+        if time.time() >= search_deadline and remaining_time() <= 0:
+            return make_timeout_result(), final_sol
+
         res = check_feasibility(prob_info, final_sol)
         return res, final_sol
 
-    # 4. Evaluate the entire portfolio and pick the best initial heuristic
-    # To keep execution super fast and leave maximum time for Simulated Annealing,
-    # we only evaluate EDD and SlackRatio as initial heuristics.
-    target_heuristics = ["EDD", "SlackRatio"]
+    def evaluate_forced_permutation(perm, search_deadline):
+        """Build a quick empty-bay-window fallback solution for all blocks."""
+        if time.time() >= search_deadline:
+            return make_timeout_result(), {"operations": {}}
+
+        bay_placed = [[] for _ in range(n_bays)]
+        bay_schedule = [[] for _ in range(n_bays)]
+        bay_loads = [0.0] * n_bays
+        assignments = baseline_greedy._place_blocks(
+            perm, blocks_data, bays,
+            bay_placed, bay_schedule, bay_loads,
+            w1, w2, w3, forced_ids=set(perm),
+            t_start=time.time(), log_interval=0,
+            deadline=search_deadline
+        )
+        sol = {"operations": baseline_greedy._build_operations(list(assignments.values()))}
+        if remaining_time() <= 0:
+            return make_timeout_result(), sol
+        return check_feasibility(prob_info, sol), sol
+
+    # 4. Evaluate a diversified portfolio and pick the best initial heuristic.
+    # EDD / SlackRatio cover due-date and slack-ratio priorities; MST adds an
+    # absolute slack ordering; LargestArea brings a geometry-first ordering that
+    # tends to win on dense_geometry / crane_trap profiles where the time-only
+    # seeds struggle.
+    target_heuristics = ["EDD", "SlackRatio", "MST", "LargestArea"]
     print(f"[Custom-SA] Evaluating selected heuristics {target_heuristics}...")
     best_obj = float("inf")
     best_sol = None
     best_perm = None
     best_heur_name = "None"
-    
-    # We allocate a reasonable portion of the timelimit to check each heuristic
-    init_check_limit = max(0.5, timelimit * 0.15)
+
+    # Scale per-heuristic repair budget so the total init phase stays ~30% of
+    # timelimit regardless of how many seeds we evaluate (matches the previous
+    # 2 * 15% = 30% budget for the 2-heuristic configuration).
+    init_check_limit = max(0.5, timelimit * 0.30 / max(1, len(target_heuristics)))
+    _emit("init.start", target_heuristics=target_heuristics, init_check_limit=init_check_limit)
     with silence_stdout():
         for name in target_heuristics:
+            if remaining_time() <= safety_margin:
+                _emit("init.skipped", name=name, reason="no_time")
+                break
             if name not in heuristics:
                 continue
             perm = heuristics[name]
-            res, sol = evaluate_permutation(perm, init_check_limit) # brief time for initial check
+            search_deadline = min(hard_deadline - safety_margin, time.time() + init_check_limit)
+            heur_t0 = time.time()
+            res, sol = evaluate_permutation(perm, search_deadline) # brief time for initial check
+            _emit("init.heuristic_result",
+                  name=name,
+                  feasible=bool(res.get("feasible")),
+                  stage=res.get("stage"),
+                  objective=res.get("objective"),
+                  wall_time=round(time.time() - heur_t0, 4))
             if res["feasible"]:
                 obj = res["objective"]
                 if obj < best_obj:
@@ -447,46 +604,52 @@ def algorithm(prob_info, timelimit=60):
                     best_perm = list(perm)
                     best_heur_name = name
 
-    # Fallback to standard EDD if no heuristic found a feasible solution
+    # Fallback: skip edd_retry (it burned ~20s without progress when all seeds
+    # failed at init_check_limit cap) and go straight to forced placement.
+    # H-001: forced_direct frees ~18s of SA wall-clock on hard bench_B5 instances.
     if best_perm is None:
-        print("[Custom-SA] Warning: No portfolio heuristic returned a feasible solution. Defaulting to EDD.")
+        print("[Custom-SA] Warning: No portfolio heuristic returned a feasible solution. Jumping directly to forced placement.")
         best_perm = list(heuristics["EDD"])
-        baseline_res, baseline_sol = evaluate_permutation(best_perm, timelimit)
-        best_obj = baseline_res["objective"] if baseline_res["feasible"] else float("inf")
-        best_sol = baseline_sol
+        _emit("init.fallback", path="forced_direct", reason="all_seeds_infeasible")
+        forced_res, forced_sol = evaluate_forced_permutation(best_perm, hard_deadline)
+        best_obj = forced_res["objective"] if forced_res["feasible"] else float("inf")
+        best_sol = forced_sol if forced_res["feasible"] else {"operations": {}}
+        _emit("init.fallback.outcome", path="forced_direct",
+              feasible=bool(forced_res.get("feasible")),
+              objective=forced_res.get("objective"))
     else:
         print(f"[Custom-SA] Chosen Initial Heuristic: {best_heur_name} | Best Objective: {best_obj:.2f}")
+        _emit("init.chosen", name=best_heur_name, objective=best_obj)
     
     # 5. Simulated Annealing local search loop over permutation space
     # Time-based loop ensures we maximize search space while strictly staying within safety bounds
-    time_budget = timelimit * 0.90 # 90% of time limit
-    
+    search_deadline = min(hard_deadline - safety_margin, start_time + timelimit * 0.90)
+    # Per-iteration cap for _repair: prevents one bad neighbor from burning the
+    # whole remaining SA budget on a runaway repair pass.
+    per_iter_repair_cap = max(2.0, timelimit * 0.05)
+
+    # Precompute focus set for Limited Local Search. blocks_data is immutable
+    # during SA, so this was previously redundantly recomputed every iteration.
+    tight_blocks = None
+    if n_blocks > 3:
+        tight_blocks = sorted(
+            range(n_blocks),
+            key=lambda i: blocks_data[i]["due_date"]
+                          - blocks_data[i]["release_time"]
+                          - blocks_data[i]["processing_time"]
+        )[:max(3, n_blocks // 3)]
+
     curr_perm = list(best_perm)
     curr_obj = best_obj
-    
+
     T = 100.0
     cooling_rate = 0.97
     iterations = 0
     improvements = 0
-    
-    print("[Custom-SA] Starting Simulated Annealing over block permutations...")
-    
-    # Identify tardy blocks in the current best solution to focus neighborhood search (Limited Local Search)
-    tardy_blocks_focused = set()
-    if best_sol is not None:
-        try:
-            with silence_stdout():
-                chk_res = check_feasibility(prob_info, best_sol)
-                # Find blocks with positive tardiness in the solution
-                # (Note: raw tardiness is not directly mapped, but we can infer from exit times)
-                # Since we don't have direct maps easily, we can also perturb around any block.
-                # To align with the user's Limited Local Search, we focus swaps/shifts on blocks
-                # that are closer to violating schedules or are at boundary times.
-                pass
-        except Exception:
-            pass
 
-    while time.time() - start_time < time_budget:
+    print("[Custom-SA] Starting Simulated Annealing over block permutations...")
+
+    while time.time() < search_deadline:
         iterations += 1
         
         # Generate neighbor permutation
@@ -495,9 +658,8 @@ def algorithm(prob_info, timelimit=60):
         
         # Limited Local Search Focus: Instead of choosing completely random indices,
         # we give a 50% higher probability to perturbing blocks with tight slack or early due dates
-        if random.random() < 0.50 and n_blocks > 3:
-            # Pick a block with tight slack
-            tight_blocks = sorted(range(n_blocks), key=lambda i: blocks_data[i]["due_date"] - blocks_data[i]["release_time"] - blocks_data[i]["processing_time"])[:max(3, n_blocks // 3)]
+        if tight_blocks is not None and random.random() < 0.50:
+            # Pick a block with tight slack (precomputed before the loop)
             focus_block = random.choice(tight_blocks)
             idx1 = cand_perm.index(focus_block)
             idx2 = random.randint(0, n_blocks - 1)
@@ -516,12 +678,17 @@ def algorithm(prob_info, timelimit=60):
             cand_perm[idx1:idx2+1] = reversed(cand_perm[idx1:idx2+1])
             
         # Evaluate neighbor candidate in silent mode to avoid console IO overhead
-        remaining_t = time_budget - (time.time() - start_time)
+        remaining_t = search_deadline - time.time()
         if remaining_t <= 0:
             break
-            
+        # Cap per-iteration repair budget so one expensive neighbor can't
+        # consume the whole remaining SA budget.
+        iter_budget = min(remaining_t, per_iter_repair_cap)
+        if iter_budget <= 0:
+            break
+
         with silence_stdout():
-            res, sol = evaluate_permutation(cand_perm, remaining_t)
+            res, sol = evaluate_permutation(cand_perm, time.time() + iter_budget)
             
         if res["feasible"]:
             obj = res["objective"]
@@ -535,6 +702,10 @@ def algorithm(prob_info, timelimit=60):
                     best_perm = list(cand_perm)
                     improvements += 1
                     print(f"[Custom-SA] Iteration {iterations} ({move_type}): New best objective: {best_obj:.2f}")
+                    _emit("sa.improvement",
+                          iteration=iterations,
+                          move_type=move_type,
+                          objective=best_obj)
             else:
                 delta = obj - curr_obj
                 # Accept worse solution with Boltzmann probability
@@ -550,11 +721,20 @@ def algorithm(prob_info, timelimit=60):
             
     print(f"[Custom-SA] Completed search. Total iterations: {iterations} | Improvements: {improvements}")
     print(f"[Custom-SA] Best Objective: {best_obj:.2f}")
-    
+    _emit("sa.complete",
+          iterations=iterations,
+          improvements=improvements,
+          best_objective=best_obj)
+
     # 6. Restore the original unpatched functions to ensure complete purity of the system
     utils.check_entry = original_check_entry
     utils.check_exit = original_check_exit
     utils.check_collisions = original_check_collisions
     baseline_greedy._find_earliest_slot = original_find_earliest_slot
-    
+
+    _emit("algo.end",
+          best_objective=best_obj,
+          wall_time=round(time.time() - start_time, 4),
+          has_solution=best_sol is not None)
+    _close_event_log()
     return best_sol

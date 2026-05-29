@@ -71,6 +71,12 @@ import math
 import time
 from utils import Bay, Block, check_entry, check_exit, check_collisions, _resolve_layers, _bounding_box
 
+_ACTIVE_DEADLINE: float | None = None
+
+
+def _active_deadline_reached() -> bool:
+    return _ACTIVE_DEADLINE is not None and time.time() >= _ACTIVE_DEADLINE
+
 
 # -----------------------------------------------------------------------------
 # Helpers: block bounding box (anchored, per orientation)
@@ -217,6 +223,9 @@ def _find_earliest_slot(new_blk: Block,
     candidate_entries = sorted({r_time} | {e for _, e in schedule_in_bay})
 
     for entry_candidate in candidate_entries:
+        if _active_deadline_reached():
+            return None, None
+
         entry  = max(r_time, entry_candidate)
         exit_t = entry + proc
 
@@ -245,6 +254,8 @@ def _find_earliest_slot(new_blk: Block,
         # placement; catch it here to avoid re-triggering repair passes.
         s4_blocked = False
         for b_other, (a_other, e_other) in zip(placed_in_bay, schedule_in_bay):
+            if _active_deadline_reached():
+                return None, None
             if a_other <= entry or e_other >= exit_t:
                 continue  # handled by Stage-2 or Stage-3 above
             if not _time_overlaps(entry, exit_t, a_other, e_other):
@@ -354,6 +365,8 @@ def greedyalgorithm(prob_info: dict, timelimit: float,
     )
     print(f"[Greedy] {'-' * 56}")
     print("[Greedy] Phase 1 : EDD greedy placement ...")
+    hard_deadline = t_start + max(0.0, timelimit)
+    phase1_deadline = t_start + max(0.0, timelimit) * 0.90
 
     bay_placed:   list[list[Block]]             = [[] for _ in range(n_bays)]
     bay_schedule: list[list[tuple[int, int]]]   = [[] for _ in range(n_bays)]
@@ -364,6 +377,7 @@ def greedyalgorithm(prob_info: dict, timelimit: float,
         bay_placed, bay_schedule, bay_loads,
         w1, w2, w3, forced_ids=set(),
         t_start=t_start, log_interval=max(1, n_blocks // 10),
+        deadline=phase1_deadline,
     )
 
     elapsed_p1 = time.time() - t_start
@@ -377,7 +391,8 @@ def greedyalgorithm(prob_info: dict, timelimit: float,
     sol = {"operations": _build_operations(list(assignments.values()))}
     assignments = _repair(prob_info, sol, assignments, bays, blocks_data,
                           w1, w2, w3, t_start, timelimit,
-                          repair_mode=repair_mode)
+                          repair_mode=repair_mode,
+                          deadline=hard_deadline)
 
     elapsed_total = time.time() - t_start
     final_sol = {"operations": _build_operations(list(assignments.values()))}
@@ -482,6 +497,7 @@ def _place_blocks(
     prev_assignments: dict[int, dict] | None = None,
     t_start: float | None = None,
     log_interval: int = 0,
+    deadline: float | None = None,
 ) -> dict[int, dict]:
     """
     Shared placement kernel used by both Phase 1 and _repair (greedy mode).
@@ -524,6 +540,11 @@ def _place_blocks(
     -------
     dict[block_id -> assignment dict] for all blocks in block_ids
     """
+    global _ACTIVE_DEADLINE
+    previous_active_deadline = _ACTIVE_DEADLINE
+    if deadline is not None:
+        _ACTIVE_DEADLINE = deadline
+
     n_bays  = len(bays)
     n_total = len(block_ids)
     result: dict[int, dict] = {}
@@ -533,6 +554,9 @@ def _place_blocks(
     _bay_areas   = [bay.width * bay.height for bay in bays]
     _avg_area    = sum(_bay_areas) / n_bays
     bay_weights  = [_avg_area / a for a in _bay_areas]
+
+    def deadline_reached() -> bool:
+        return deadline is not None and time.time() >= deadline
 
     for rank, bi in enumerate(block_ids):
         blk_data = blocks_data[bi]
@@ -546,7 +570,7 @@ def _place_blocks(
 
         best_score     = float("inf")
         best_placement = None
-        used_forced    = bi in forced_ids
+        used_forced    = bi in forced_ids or deadline_reached()
 
         if not used_forced:
             # -- Repair fast-path: try previous (bay, x, y, orient) first -----
@@ -575,11 +599,15 @@ def _place_blocks(
             # -- Full search (Phase-1 style) -----------------------------------
             bay_order = sorted(range(n_bays), key=lambda j: prefs[j], reverse=True)
             for bay_id in bay_order:
+                if deadline_reached():
+                    break
                 bay             = bays[bay_id]
                 placed_in_bay   = bay_placed[bay_id]
                 schedule_in_bay = bay_schedule[bay_id]
 
                 for oi in range(n_orient):
+                    if deadline_reached():
+                        break
                     blk_bb = _block_bbox(blk_data, oi)
                     bw = blk_bb[2] - blk_bb[0]
                     bh = blk_bb[3] - blk_bb[1]
@@ -590,6 +618,8 @@ def _place_blocks(
                         bay.width, bay.height, placed_in_bay, blk_bb
                     )
                     for (cx, cy) in candidates:
+                        if deadline_reached():
+                            break
                         new_blk = Block(block_id=bi, block_data=blk_data,
                                         x=cx, y=cy, orient_idx=oi)
                         if not bay.contains_block(new_blk):
@@ -648,6 +678,7 @@ def _place_blocks(
                       f"  fallback={n_fallback}{flag}"
                       f"  {elapsed:.1f}s")
 
+    _ACTIVE_DEADLINE = previous_active_deadline
     return result
 
 
@@ -664,7 +695,8 @@ def _repair(prob_info: dict,
             t_start: float,
             timelimit: float,
             max_passes: int = 10,
-            repair_mode: str = "greedy") -> dict[int, dict]:
+            repair_mode: str = "greedy",
+            deadline: float | None = None) -> dict[int, dict]:
     """
     Iteratively detect infeasible blocks and repair them.
 
@@ -719,7 +751,12 @@ def _repair(prob_info: dict,
     repaired_counts: dict[int, int] = {}
     forced_ids:      set[int]       = set()
 
+    def deadline_reached() -> bool:
+        return deadline is not None and time.time() >= deadline
+
     for pass_idx in range(max_passes):
+        if deadline_reached():
+            break
         if time.time() - t_start > timelimit * 0.98:
             break
 
@@ -764,6 +801,8 @@ def _repair(prob_info: dict,
                 bay_schedule[a["bay_id"]].append((a["entry_time"], a["exit_time"]))
 
             for ri, bid in enumerate(to_repair):
+                if deadline_reached():
+                    break
                 a      = assignments[bid]
                 bay_id = a["bay_id"]
                 r_time = blocks_data[bid]["release_time"]
@@ -833,7 +872,7 @@ def _repair(prob_info: dict,
                 # Time guard: switch to forced path when 90% of timelimit is used.
                 # Without this, a slow repair search could exhaust the timelimit
                 # before all blocks are placed, causing Stage-1 (assignment) failures.
-                if time.time() - t_start > timelimit * 0.90:
+                if deadline_reached() or time.time() - t_start > timelimit * 0.90:
                     forced_ids.add(bi)
                 prev_a  = assignments.get(bi)
                 partial = _place_blocks(
@@ -841,6 +880,7 @@ def _repair(prob_info: dict,
                     bay_placed, bay_schedule2, bay_loads,
                     w1, w2, w3, forced_ids,
                     prev_assignments=assignments,
+                    deadline=deadline,
                 )
                 assignments.update(partial)
                 new_a       = partial[bi]
