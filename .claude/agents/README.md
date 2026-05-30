@@ -1,103 +1,110 @@
 # OGC2026 Improvement Loop — Agent Workflow
 
-Four project sub-agents that together form a measurable improvement loop on top of `tools/eval_runner.py` and `tools/eval_summary.py`. Each agent is intentionally narrow; the orchestration is done by the user (or the parent Claude session) handing structured artifacts between them.
+`tools/eval_runner.py`와 `tools/eval_summary.py` 위에서 측정 가능한 개선 loop을
+이루는 4개의 프로젝트 sub-agent. 각 agent는 의도적으로 좁은 책임만 가지며,
+orchestration은 사용자(또는 부모 Claude 세션)가 agent 사이에 구조화된 산출물을
+넘기며 수행한다.
 
 ## The loop
 
 ```
         ┌──────────────────────────────┐
-        │  tools/eval_runner.py        │  populates SQLite + JSONL
+        │  tools/eval_runner.py        │  SQLite + JSONL 채움
         └──────────────┬───────────────┘
                        ↓
         ┌──────────────────────────────┐
-        │  eval-analyst (haiku)        │  data → structured Markdown report
+        │  eval-analyst (haiku)        │  데이터 → 구조화된 Markdown 보고서
         └──────────────┬───────────────┘
                        ↓
         ┌──────────────────────────────┐
-        │  improvement-strategist      │  report + codebase → 1–3 hypotheses (JSON)
+        │  improvement-strategist      │  보고서 + 코드 → 1–3개 가설 (JSON)
         │  (opus)                      │
         └──────────────┬───────────────┘
                        ↓
-            user picks one
+            사용자가 하나 선택
                        ↓
         ┌──────────────────────────────┐
-        │  solver-developer (sonnet)   │  hypothesis → minimal code change
+        │  solver-developer (sonnet)   │  가설 → 최소 코드 변경
         └──────────────┬───────────────┘
                        ↓
         ┌──────────────────────────────┐
-        │  tools/eval_runner.py (again)│  populates new run
+        │  tools/eval_runner.py (다시) │  새 run 적재
         └──────────────┬───────────────┘
                        ↓
         ┌──────────────────────────────┐
-        │  approval-gate (sonnet)      │  before/after runs → APPROVE / REJECT / REVIEW
+        │  approval-gate (sonnet)      │  before/after run → APPROVE / REJECT / REVIEW
         └──────────────────────────────┘
                        │
-              APPROVE  ↓        REJECT → revert (git revert) → loop back to strategist
-                      next hypothesis
+              APPROVE  ↓        REJECT → revert (git revert) → strategist로 회귀
+                      다음 가설
 ```
 
 ## Agent roster
 
-| Agent | Model | Tools | What it reads | What it produces |
+| Agent | Model | Tools | 읽는 것 | 만드는 것 |
 |---|---|---|---|---|
-| `eval-analyst` | haiku | Bash, Read, Grep | SQLite + JSONL | Markdown eval report |
-| `improvement-strategist` | opus | Read, Grep, Glob, Bash, WebSearch, WebFetch | Eval report + code + history | JSON array of hypotheses |
-| `solver-developer` | sonnet | Read, Edit, Write, Grep, Glob, Bash | One hypothesis JSON | Code change + Markdown summary |
-| `approval-gate` | sonnet | Bash, Read | Two run_ids in SQLite | APPROVE/REJECT/REVIEW verdict |
+| `eval-analyst` | haiku | Bash, Read, Grep, MCP sqlite read | SQLite + JSONL | Markdown eval 보고서 |
+| `improvement-strategist` | opus | Read, Grep, Glob, Bash, WebSearch, WebFetch | Eval 보고서 + 코드 + 히스토리 | 가설 JSON 배열 |
+| `solver-developer` | sonnet | Read, Edit, Write, Grep, Glob, Bash | 가설 JSON 하나 | 코드 변경 + Markdown 요약 |
+| `approval-gate` | sonnet | Bash, Read, MCP sqlite read | SQLite의 두 run_id | APPROVE/REJECT/REVIEW 판정 |
 
-## Invocation patterns (the routing model picks these up from each agent's `description:`)
+## 호출 패턴 (라우터가 각 agent의 `description:`에서 인식)
 
-| You say... | Routed to |
+| 사용자가 말하면... | 라우팅 대상 |
 |---|---|
-| "summarize run 5" / "how did the last eval go?" | `eval-analyst` |
-| "what next?" / "propose hypotheses" / "suggest changes" | `improvement-strategist` |
-| "implement H-007" / "apply this hypothesis" | `solver-developer` |
-| "gate check run 8 vs 7" / "approve H-007" / "should we merge?" | `approval-gate` |
+| "summarize run 5" / "지난 eval 어땠어?" / "run N 정리" | `eval-analyst` |
+| "다음은?" / "가설 제안" / "뭘 바꿔볼까?" | `improvement-strategist` |
+| "H-007 구현해줘" / "이 가설 적용" | `solver-developer` |
+| "run 8 vs 7 비교" / "H-007 승인" / "머지해도 돼?" | `approval-gate` |
 
-## Scratch directory contracts
+## Scratch directory 계약
 
-The agents persist artifacts under `.claude/scratch/` so the loop has cross-session memory:
+agent들은 loop의 cross-session 메모리를 위해 산출물을 `.claude/scratch/` 아래 영속화:
 
-| File | Owner (write) | Reader (read) | Format |
+| 파일 | 쓰는 주체 | 읽는 주체 | 형식 |
 |---|---|---|---|
-| `hypotheses_history.jsonl` | improvement-strategist | improvement-strategist (anti-pattern), approval-gate (lookup) | one hypothesis JSON per line |
+| `hypotheses_history.jsonl` | improvement-strategist | improvement-strategist (anti-pattern), approval-gate (조회) | 한 줄당 가설 JSON |
 | `implemented.jsonl` | solver-developer | approval-gate | `{hypothesis_id, files, git_sha_before, implemented_at}` per line |
-| `verdicts.jsonl` | approval-gate | improvement-strategist (track rejection causes) | `{target_run, baseline_run, decision, ...}` per line |
-| `rejected.jsonl` | (user, on REJECT) | improvement-strategist | `{hypothesis_id, why}` per line |
+| `verdicts.jsonl` | approval-gate | improvement-strategist (거절 원인 추적) | `{target_run, baseline_run, decision, ...}` per line |
+| `rejected.jsonl` | (사용자, REJECT 시) | improvement-strategist | `{hypothesis_id, why}` per line |
 
-All scratch files are append-only. None are gitignored by default — the user decides whether to commit them.
+모든 scratch 파일은 append-only. 기본적으로 gitignore 대상 — 커밋 여부는 사용자
+결정.
 
-## Manual happy-path (today)
+## 수동 happy-path (현재)
 
-The loop is not auto-driven yet. Today the human triggers each step:
+loop은 아직 자동 구동이 아니다. 지금은 사람이 각 단계를 trigger:
 
 ```bash
-# 0. (one-time) Make sure the env is active.
+# 0. (한 번) env 활성화 확인.
 conda activate ogc2026
 
-# 1. Run an eval.
+# 1. eval 실행.
 python tools/eval_runner.py --timelimit 30 --pattern "bench_*.json" --note "<context>"
 
-# 2. Ask the eval-analyst.
-#    (In Claude Code: "summarize the last run")
+# 2. eval-analyst 호출.
+#    (Claude Code에서: "지난 run 정리해줘")
 
-# 3. Ask the improvement-strategist.
-#    (In Claude Code: "given that report, propose hypotheses")
+# 3. improvement-strategist 호출.
+#    (Claude Code에서: "그 보고서 기반으로 가설 제안해줘")
 
-# 4. Pick one. Then:
-#    (In Claude Code: "implement H-NNN")
+# 4. 하나 선택. 그리고:
+#    (Claude Code에서: "H-NNN 구현해줘")
 
-# 5. Re-run the eval on the same pattern.
+# 5. 같은 패턴으로 eval 재실행.
 python tools/eval_runner.py --timelimit 30 --pattern "bench_*.json" --note "post H-NNN"
 
 # 6. Gate check.
-#    (In Claude Code: "approve H-NNN" or "gate check run <new> vs <prev>")
+#    (Claude Code에서: "H-NNN 승인" 또는 "run <new> vs <prev> 비교")
 ```
 
-## Design constraints (don't violate these when editing the agents)
+## 설계 제약 (agent 편집 시 위반 금지)
 
-- **No agent modifies the eval data.** Only `tools/eval_runner.py` writes to the SQLite DB.
-- **Each agent is single-purpose.** If you find yourself adding a second responsibility to an agent, split it.
-- **Hypotheses are immutable once recorded.** If a hypothesis evolves, give it a new ID.
-- **Rules over judgment in the gate.** New rules go into `approval-gate.md`'s rule list; do not add inline LLM judgment around existing rules.
-- **`utils.py` is sacred** — no agent ever proposes or applies edits to it. State this in the agent body if adding a new agent.
+- **어떤 agent도 eval 데이터를 수정하지 않는다.** SQLite DB를 쓸 권한은 오직
+  `tools/eval_runner.py`.
+- **각 agent는 단일 책임.** 두 번째 책임을 추가하고 있는 자신을 발견하면 분리할 것.
+- **기록된 가설은 immutable.** 가설이 진화하면 새 ID를 부여.
+- **gate는 판단보다 규칙.** 새 규칙은 `approval-gate.md`의 rule list에 추가; 기존
+  규칙 주위에 inline LLM 판단을 끼워넣지 말 것.
+- **`utils.py`는 신성 불가침** — 어떤 agent도 편집을 제안하거나 적용하지 않는다.
+  새 agent를 추가하면 본문에 이를 명시할 것.
