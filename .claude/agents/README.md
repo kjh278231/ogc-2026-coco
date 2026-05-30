@@ -73,14 +73,18 @@ agent들은 loop의 cross-session 메모리를 위해 산출물을 `.claude/scra
 
 ## 수동 happy-path (현재)
 
-loop은 아직 자동 구동이 아니다. 지금은 사람이 각 단계를 trigger:
+loop은 아직 자동 구동이 아니다. 지금은 사람이 각 단계를 trigger.
+**실행 환경 / 명령어 상세는 [ENVIRONMENT.md](../../ENVIRONMENT.md) 참고.**
 
-```bash
-# 0. (한 번) env 활성화 확인.
-conda activate ogc2026
+```powershell
+# 0. (한 번) 환경 확인.
+py -3.12 tools/check_env.py
+# 경로 B (.codex_deps shim) 사용 시:
+$env:PYTHONPATH = "C:\Users\ADMIN\Workspace\ogc2026\.codex_deps"
+$env:PYTHONIOENCODING = "utf-8"
 
 # 1. eval 실행.
-python tools/eval_runner.py --timelimit 30 --pattern "bench_*.json" --note "<context>"
+py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_*.json" --note "<context>"
 
 # 2. eval-analyst 호출.
 #    (Claude Code에서: "지난 run 정리해줘")
@@ -92,11 +96,14 @@ python tools/eval_runner.py --timelimit 30 --pattern "bench_*.json" --note "<con
 #    (Claude Code에서: "H-NNN 구현해줘")
 
 # 5. 같은 패턴으로 eval 재실행.
-python tools/eval_runner.py --timelimit 30 --pattern "bench_*.json" --note "post H-NNN"
+py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_*.json" --note "post H-NNN"
 
 # 6. Gate check.
 #    (Claude Code에서: "H-NNN 승인" 또는 "run <new> vs <prev> 비교")
 ```
+
+conda env (경로 A)를 쓰면 `py -3.12` 대신 `python`을 쓰고 PYTHONPATH 설정은
+불필요. 자세한 것은 ENVIRONMENT.md.
 
 ## 설계 제약 (agent 편집 시 위반 금지)
 

@@ -25,30 +25,38 @@ Solver는 block을 사각형 bay에 `(x, y, orient, entry_time, exit_time)` 결�
 
 ## Environment
 
-```bash
-conda env create -f ogc2026_env.yml
-conda activate ogc2026
-```
+> **실행 환경 / 명령어 빠른 시작은 [ENVIRONMENT.md](ENVIRONMENT.md) 참고.**
+> 매 세션에서 "Python 어떻게 부르지 / shapely 어디 있지"를 다시 찾지 않도록
+> 정리해뒀음. 새 세션 시작 시 `py -3.12 tools/check_env.py` 한 줄로 검증
+> 가능.
 
-Python 3.12, PyQt6 GUI, geometry는 Shapely. 무거운 옵션 deps로 Gurobi, Xpress,
-OR-Tools, Torch, TF 포함. Numba와 OpenJDK도 함께 들어온다.
+두 가지 설치 경로:
+- **경로 A (정식, conda)**: `conda env create -f ogc2026_env.yml; conda
+  activate ogc2026` — Python 3.12 + shapely + Gurobi/Xpress/OR-Tools/Torch/TF
+  포함. GUI tester까지 모두 동작.
+- **경로 B (최소, `.codex_deps` shim)**: `py -3.12` + `PYTHONPATH=.codex_deps`.
+  shapely/numpy만 들어있어 Hermes solver와 eval 인프라는 돌지만 GUI tester나
+  Gurobi 비교는 못 돔.
 
 ## Common Commands
 
-```bash
-# GUI tester 실행 (instance + algorithm 폴더 선택 후 Run 클릭)
-conda activate ogc2026
-cd alg_tester && python alg_tester_app.py
+자세한 치트시트는 [ENVIRONMENT.md §5](ENVIRONMENT.md#5-자주-쓰는-명령-치트시트)
+참고. 핵심만 옮기면:
 
-# Headless 일괄 평가: 모든 benchmark JSON에 대해 baseline_greedy와 myalgorithm
-# 을 돌리고 비교 표를 출력.
-python evaluate_all.py --timelimit 60 --greedy-timelimit 10
-python evaluate_all.py --pattern "smoke_*.json" --output results.json
+```powershell
+# 환경 검증 (한 줄)
+py -3.12 tools/check_env.py
 
-# Benchmark suite 생성 (alg_tester/example/benchmark/에 기록)
-python alg_tester/example/generate_benchmark_suite.py --suite smoke
-python alg_tester/example/generate_benchmark_suite.py --single --name my_dense \
-    --bays 5 --blocks 120 --profile dense_geometry
+# Eval 실행 (경로 B 기준)
+$env:PYTHONPATH = "C:\Users\ADMIN\Workspace\ogc2026\.codex_deps"
+$env:PYTHONIOENCODING = "utf-8"
+py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_B5_*.json" --note "<context>"
+
+# Geometry debug (stage 2/3/4 실패 분해)
+py -3.12 tools/geometry_debug.py --instance alg_tester/example/benchmark/<name>.json --probe-edd
+
+# Benchmark suite 생성
+py -3.12 alg_tester/example/generate_benchmark_suite.py --suite smoke
 ```
 
 테스트 프레임워크, lint 설정, 빌드 단계가 없다 — benchmark instance에 대한
