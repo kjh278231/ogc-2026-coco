@@ -1,0 +1,14 @@
+{"t": 0.0, "event": "algo.start", "timelimit": 30.0}
+{"t": 0.059, "event": "algo.context", "n_blocks": 120, "n_bays": 5, "w1": 1800, "w2": 9, "w3": 80}
+{"t": 0.061, "event": "init.start", "target_heuristics": ["EDD", "SlackRatio", "MST", "LargestArea"], "init_check_limit": 2.25}
+{"t": 2.3199, "event": "init.heuristic_result", "name": "EDD", "feasible": false, "stage": 2, "objective": null, "wall_time": 2.259}
+{"t": 4.5786, "event": "init.heuristic_result", "name": "SlackRatio", "feasible": false, "stage": 2, "objective": null, "wall_time": 2.2587}
+{"t": 6.8395, "event": "init.heuristic_result", "name": "MST", "feasible": false, "stage": 2, "objective": null, "wall_time": 2.2609}
+{"t": 9.1077, "event": "init.heuristic_result", "name": "LargestArea", "feasible": false, "stage": 2, "objective": null, "wall_time": 2.2682}
+{"t": 9.1077, "event": "init.fallback", "path": "forced_direct", "reason": "all_seeds_infeasible"}
+{"t": 9.1417, "event": "init.fallback.outcome", "path": "forced_direct", "feasible": true, "objective": 14325850.88552989}
+{"t": 19.2044, "event": "sa.improvement", "iteration": 5, "move_type": "invert", "objective": 10311850.88552989}
+{"t": 21.2271, "event": "sa.improvement", "iteration": 6, "move_type": "insert", "objective": 10218250.88552989}
+{"t": 23.2502, "event": "sa.improvement", "iteration": 7, "move_type": "insert", "objective": 10216450.88552989}
+{"t": 27.0225, "event": "sa.complete", "iterations": 9, "improvements": 3, "best_objective": 10216450.88552989}
+{"t": 27.0225, "event": "algo.end", "best_objective": 10216450.88552989, "wall_time": 27.0225, "has_solution": true}
