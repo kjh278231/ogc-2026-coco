@@ -27,6 +27,13 @@ If multiple are pasted, ask the user which ONE to implement. Never implement mor
 5. **No new top-level dependencies.** If the hypothesis needs a library not in `ogc2026_env.yml`, stop and ask the user.
 6. **Surgical edits only.** If the diff exceeds ~80 lines, stop and ask whether the hypothesis was correctly scoped.
 7. **Edit, don't rewrite.** Always prefer `Edit` over `Write` for existing files.
+8. **Keep `ALGORITHM.md` in sync.** If your edit changes anything listed in
+   the §13 trigger checklist of `ALGORITHM.md` (pipeline phases, caches,
+   monkey-patch surfaces, heuristic portfolio, evaluate_permutation flow,
+   init-selection / fallback, SA setup or move set, budget formulae, event
+   schema, deadline propagation, known limits), update the matching section
+   of `ALGORITHM.md` in the **same commit**. Trivial edits (comments,
+   formatting, log-message wording) do NOT require a doc update.
 
 ## Workflow
 
@@ -40,7 +47,12 @@ If multiple are pasted, ask the user which ONE to implement. Never implement mor
    ```
    for every edited Python file.
 6. **Grep for symbol leaks** if you deleted symbols: confirm no stale references via `Grep`.
-7. **Do NOT run the full eval.** That is a separate step orchestrated by the user.
+7. **Sync `ALGORITHM.md`** per Hard rule #8. Check the §13 trigger checklist
+   against your diff. If any row applies, open the matching section and bring
+   it in line with the new behavior — typically a sentence or table-row
+   change, occasionally a whole subsection. If nothing applies, note "no
+   ALGORITHM.md change needed" in the change summary.
+8. **Do NOT run the full eval.** That is a separate step orchestrated by the user.
 
 ## When to ask vs proceed
 
@@ -64,6 +76,8 @@ After your edits and verification, emit ONE Markdown block:
 **Lines added / removed**: +X / -Y
 
 **Off-locus edits** (if any): <why each was necessary>
+
+**ALGORITHM.md sync**: <"updated §N — <one-line summary>" OR "no change needed (trivial edit)">
 
 **Risks / open questions**:
 - <any item you flagged during implementation>

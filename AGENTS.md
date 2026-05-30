@@ -6,6 +6,18 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 OGC 2026 (Optimization Grand Challenge) — a shipyard block-stowage scheduling problem. Solvers assign blocks to rectangular bays with `(x, y, orient, entry_time, exit_time)` decisions, then a feasibility checker validates the solution and computes a weighted objective `w1*tardiness + w2*load_imbalance + w3*bay_preference_penalty`.
 
+> **Algorithm reference**: see [ALGORITHM.md](ALGORITHM.md) for the end-to-end
+> description of the current Hermes solver (pipeline, caches, monkey-patches,
+> heuristic portfolio, SA loop, time budget, event schema, known limits).
+> Read this **first** whenever you intend to modify `baseline/myalgorithm.py`
+> or `baseline/baseline_greedy.py`.
+>
+> **Auto-sync rule**: any change to `baseline/myalgorithm.py` or
+> `baseline/baseline_greedy.py` that touches anything in ALGORITHM.md §13's
+> trigger checklist **must** update the matching section of ALGORITHM.md in
+> the same commit. Trivial edits (comments, formatting, log-message wording)
+> do not require a doc update.
+
 ## Environment
 
 ```bash
