@@ -199,6 +199,28 @@ Claude agent prompt에 `CLAUDE.md`를 읽으라고 적힌 곳은 Codex 세션에
 - 파일/함수/심볼 이름
 - 인용된 event 이름이나 JSON 키
 
+## 한글 / UTF-8 문서 확인 규칙
+
+한글 markdown 문서를 읽거나 커밋/ignore 여부를 판단할 때 **PowerShell
+`Get-Content`/`cat` 출력이 mojibake처럼 보인다는 이유만으로 파일이 깨졌다고
+판단하지 않는다.** Windows console codepage나 렌더링 환경 문제일 수 있다.
+
+하지 말아야 할 패턴:
+
+- `Get-Content` 출력의 `ì...` 또는 물음표/깨진 문자 표시만 보고 "파일이 깨졌다"고 결론내기.
+- 표시가 깨져 보인다는 이유만으로 정상 문서를 `.gitignore`에 넣거나 커밋에서 제외하기.
+- `$env:PYTHONIOENCODING="utf-8"`이 PowerShell 자체 출력 인코딩까지 고친다고 가정하기
+  (Python 프로세스에만 적용된다).
+
+체크리스트:
+
+- Python으로 `Path(path).read_text(encoding="utf-8")`가 예외 없이 읽히는지 확인한다.
+- `s.count("\ufffd")`로 replacement character가 실제 내용에 들어 있는지 확인한다.
+- 필요하면 `s[:N].encode("unicode_escape").decode()`로 한글이 `\uc54c...` 같은 정상
+  Unicode escape인지 확인한다.
+- 파일 판정이나 바이트 확인이 필요하면 `file`/hex dump/`read_bytes()` 결과를 함께 본다.
+- 위 확인 없이 한글 문서를 "깨진 파일", "임시 산출물", "ignore 대상"으로 분류하지 않는다.
+
 ## 문서 작성 규칙
 
 코드 외 markdown 산출물(ALGORITHM.md, progress.md, agent/skill prompt,
