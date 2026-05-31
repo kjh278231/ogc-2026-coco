@@ -19,3 +19,14 @@ tools/debug_dumps/
 
 # Ad-hoc result dumps from manual evaluate_all.py runs
 results_*.json
+
+# Local benchmark/evaluation artifacts
+tools/ogc2026_runs.db
+tools/ogc2026_runs.db-*
+tools/event_logs/
+tools/compare*.json
+tools/cmp_*.json
+tools/debug*.jsonl
+
+# Ad-hoc generated explanation draft
+MY_NEW_ALGORITHM_EXPLANATION.md

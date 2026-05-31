@@ -19,7 +19,9 @@ Solver는 block을 사각형 bay에 `(x, y, orient, entry_time, exit_time)` 결�
 > **Auto-sync rule**: `baseline/myalgorithm.py` 또는 `baseline/baseline_greedy.py`의
 > 변경이 ALGORITHM.md §13의 트리거 체크리스트 항목을 건드리면, 같은 커밋
 > 안에서 ALGORITHM.md의 해당 섹션을 **반드시** 갱신해야 한다. 사소한 변경
-> (주석, 포맷팅, 로그 문구)은 doc 업데이트 불필요.
+> (주석, 포맷팅, 로그 문구)은 doc 업데이트 불필요. Claude용
+> `solver-developer` agent도 이 규칙을 강제하므로, Codex 세션에서 solver를 직접
+> 편집할 때도 같은 기준을 따른다.
 
 ## Environment
 
@@ -50,6 +52,9 @@ $env:PYTHONPATH = "C:\Users\ADMIN\Workspace\ogc2026\.codex_deps"
 $env:PYTHONIOENCODING = "utf-8"
 py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_B5_*.json" --note "<context>"
 
+# 기본 벤치마크 (별도 지정 없으면 이것 = Athena 병렬 전체 suite)
+py -3.12 tools/parallel_eval.py --algo athena --timelimit 60 --pattern "*.json" --note "<context>"
+
 # Geometry debug (stage 2/3/4 실패 분해)
 py -3.12 tools/geometry_debug.py --instance alg_tester/example/benchmark/<name>.json --probe-edd
 
@@ -59,6 +64,15 @@ py -3.12 alg_tester/example/generate_benchmark_suite.py --suite smoke
 
 테스트 프레임워크, lint 설정, 빌드 단계가 없다 — benchmark instance에 대한
 평가가 곧 테스트 loop이다.
+
+> **벤치마크 default**: 사용자가 알고리즘을 명시하지 않고 "벤치마크 수행"을
+> 요청하면 **Athena (`baseline/my_new_algorithm.py`)를 `parallel_eval.py`로
+> 병렬 실행**하는 것이 default다 (Hermes serial 아님). `eval_runner.py`와
+> `parallel_eval.py` 둘 다 `--algo {hermes|myalgorithm|athena}`를 받으며 CLI
+> 기본값은 backward-compat을 위해 `hermes`이므로 **`--algo athena`를 명시**해야
+> 한다. 결과는 DB에 `algo="athena"`로 Hermes pool과 분리 기록된다. A/B 비교는
+> 반드시 동일한 `--workers`/`--cores-per-worker`에서만 (parallel 대 serial 비교
+> 금지).
 
 ## Architecture
 
@@ -148,6 +162,43 @@ contestant가 수정하면 안 된다고 명시함.
 파일 이름의 `B<n>` = bay 수; `b<n>` = block 수. `smoke_*`는 빠른 sanity
 instance; `bench_*`와 `my_B5_b200_hard.json`은 더 어려운 run.
 
+## Claude-origin rules / memory
+
+이 repo에는 Claude Code용 운영 지침과 cross-session memory가 `.claude/` 아래에
+이미 구성돼 있다. Codex는 Claude sub-agent를 자동 실행하지 않지만, 같은 작업을
+할 때 아래 파일을 **Codex에서도 적용되는 canonical reference**로 취급한다.
+
+- `.claude/agents/README.md` — eval/improvement/implementation/gate loop의 전체
+  흐름.
+- `.claude/agents/eval-analyst.md` — eval 결과를 기계적으로 요약할 때의 규칙.
+- `.claude/agents/improvement-strategist.md` — 가설을 제안할 때의 입력, 출력,
+  anti-pattern memory 규칙.
+- `.claude/agents/solver-developer.md` — 선택된 가설 하나를 구현할 때의 hard
+  rules. 특히 `utils.py` 불변, `algorithm()` signature 유지, monkey-patch 복구,
+  `ALGORITHM.md` sync를 그대로 따른다.
+- `.claude/agents/approval-gate.md` — before/after run 비교와 APPROVE/REJECT/REVIEW
+  판정 규칙.
+- `.claude/skills/geometry-debug/SKILL.md` — Stage 2/3/4 feasibility 실패 원인
+  분해가 필요할 때의 절차와 응답 형식.
+- `.claude/scratch/*.jsonl` — 가설 이력, 구현 이력, gate 판정의 append-only
+  memory. 별도 `.codex/scratch` 복사본을 만들지 말고, 이 디렉터리를 공유 memory로
+  사용한다. 새 기록을 남길 때도 기존 schema를 유지한다.
+
+Claude agent prompt에 `CLAUDE.md`를 읽으라고 적힌 곳은 Codex 세션에서는 이
+`AGENTS.md`를 우선 읽고, Claude-only 차이가 필요한 경우에만 `CLAUDE.md`를 함께
+확인한다.
+
+## 답변 / 응답 언어 규칙
+
+사용자에게 보내는 **채팅 응답(답변)은 한국어로 작성**한다. 단, 아래는 영어를
+그대로 유지한다 (억지로 번역하지 말 것):
+
+- 기술용어 (monkey-patch, OBB cache, Stage 2, simulated annealing, descent
+  rule, multi-start 등)
+- 코드 블록과 명령어, CLI 플래그, 환경 변수
+- 파일/함수/심볼 이름
+- 인용된 event 이름이나 JSON 키
+
 ## 문서 작성 규칙
 
 코드 외 markdown 산출물(ALGORITHM.md, progress.md, agent/skill prompt,
@@ -158,3 +209,6 @@ README 등)은 **한글로 작성**한다. 단, 다음은 영어 유지:
 - 코드 블록과 명령어
 - 파일/함수/심볼 이름
 - 인용된 event 이름이나 JSON 키
+
+agent frontmatter의 `description` 필드는 라우터의 trigger detection을 위해
+한국어 / 영어 표현 두 가지를 모두 포함시킨다.

@@ -162,6 +162,17 @@ contestant가 수정하면 안 된다고 명시함.
 파일 이름의 `B<n>` = bay 수; `b<n>` = block 수. `smoke_*`는 빠른 sanity
 instance; `bench_*`와 `my_B5_b200_hard.json`은 더 어려운 run.
 
+## 답변 / 응답 언어 규칙
+
+사용자에게 보내는 **채팅 응답(답변)은 한국어로 작성**한다. 단, 아래는 영어를
+그대로 유지한다 (억지로 번역하지 말 것):
+
+- 기술용어 (monkey-patch, OBB cache, Stage 2, simulated annealing, descent
+  rule, multi-start 등)
+- 코드 블록과 명령어, CLI 플래그, 환경 변수
+- 파일/함수/심볼 이름
+- 인용된 event 이름이나 JSON 키
+
 ## 문서 작성 규칙
 
 코드 외 markdown 산출물(ALGORITHM.md, progress.md, agent/skill prompt,
