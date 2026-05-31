@@ -66,7 +66,8 @@ py -3.12 alg_tester/example/generate_benchmark_suite.py --suite smoke
 평가가 곧 테스트 loop이다.
 
 > **벤치마크 default**: 사용자가 알고리즘을 명시하지 않고 "벤치마크 수행"을
-> 요청하면 **Athena (`baseline/my_new_algorithm.py`)를 `parallel_eval.py`로
+> 요청하면 **Athena (`baseline/my_new_algorithm.py` entrypoint,
+> `baseline/athena/` 구현 패키지)를 `parallel_eval.py`로
 > 병렬 실행**하는 것이 default다 (Hermes serial 아님). `eval_runner.py`와
 > `parallel_eval.py` 둘 다 `--algo {hermes|myalgorithm|athena}`를 받으며 CLI
 > 기본값은 backward-compat을 위해 `hermes`이므로 **`--algo athena`를 명시**해야

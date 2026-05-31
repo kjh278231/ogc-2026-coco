@@ -1,15 +1,34 @@
 # OGC2026 Improvement Loop — Agent Workflow
 
-`tools/eval_runner.py`와 `tools/eval_summary.py` 위에서 측정 가능한 개선 loop을
-이루는 4개의 프로젝트 sub-agent. 각 agent는 의도적으로 좁은 책임만 가지며,
-orchestration은 사용자(또는 부모 Claude 세션)가 agent 사이에 구조화된 산출물을
-넘기며 수행한다.
+`tools/eval_runner.py`(serial) / `tools/parallel_eval.py`(parallel) 와
+`tools/eval_summary.py` 위에서 측정 가능한 개선 loop을 이루는 4개의 프로젝트
+sub-agent. 각 agent는 의도적으로 좁은 책임만 가지며, orchestration은
+사용자(또는 부모 Claude 세션)가 agent 사이에 구조화된 산출물을 넘기며 수행한다.
+
+## Multi-algo 규약 (모든 agent 공통)
+
+문제(OGC2026 block-stowage)는 고정이지만 solver는 여러 개이고 앞으로 더 늘 수 있다.
+4개 agent 모두 **대상 algo를 먼저 식별**하고 그에 맞는 파일·doc·러너·DB label로
+동작한다. 매핑의 single source of truth는 `tools/eval_runner.py`의 `ALGOS` dict:
+
+| `--algo` | solver 파일 | reference doc | 기본 러너 | DB label |
+|---|---|---|---|---|
+| `hermes`/`myalgorithm` | `baseline/myalgorithm.py` | `ALGORITHM.md` | `eval_runner.py` (serial) | `myalgorithm` |
+| `athena` | `baseline/my_new_algorithm.py` entrypoint + `baseline/athena/` internals | `MY_NEW_ALGORITHM_EXPLANATION.md` | `parallel_eval.py --algo athena` (parallel) | `athena` |
+
+- **벤치마크 default = Athena를 `parallel_eval.py`로 병렬 실행.** algo 미지정 시 이것.
+- **A/B 비교는 같은 algo·같은 러너·같은 `--workers`/`--cores-per-worker`에서만.**
+  parallel athena와 serial hermes의 objective를 직접 비교하지 말 것.
+- `instance_results`의 `sa_iterations`/`init_heuristic`/`fallback_triggered` 컬럼은
+  Hermes event 기준이라 **athena에선 비어 있다** — athena 신호는 `events`의
+  `athena.*`(+ per-worker `.worker<k>` 로그)에서 읽는다.
 
 ## The loop
 
 ```
         ┌──────────────────────────────┐
-        │  tools/eval_runner.py        │  SQLite + JSONL 채움
+        │  eval_runner.py (serial) /   │  SQLite + JSONL 채움
+        │  parallel_eval.py (parallel) │  (athena 벤치마크 default)
         └──────────────┬───────────────┘
                        ↓
         ┌──────────────────────────────┐
@@ -28,7 +47,7 @@ orchestration은 사용자(또는 부모 Claude 세션)가 agent 사이에 구�
         └──────────────┬───────────────┘
                        ↓
         ┌──────────────────────────────┐
-        │  tools/eval_runner.py (다시) │  새 run 적재
+        │  eval 재실행 (같은 algo·러너) │  새 run 적재
         └──────────────┬───────────────┘
                        ↓
         ┌──────────────────────────────┐
@@ -63,10 +82,13 @@ agent들은 loop의 cross-session 메모리를 위해 산출물을 `.claude/scra
 
 | 파일 | 쓰는 주체 | 읽는 주체 | 형식 |
 |---|---|---|---|
-| `hypotheses_history.jsonl` | improvement-strategist | improvement-strategist (anti-pattern), approval-gate (조회) | 한 줄당 가설 JSON |
-| `implemented.jsonl` | solver-developer | approval-gate | `{hypothesis_id, files, git_sha_before, implemented_at}` per line |
+| `hypotheses_history.jsonl` | improvement-strategist | improvement-strategist (anti-pattern), approval-gate (조회) | 한 줄당 가설 JSON (`algo` 필드 포함) |
+| `implemented.jsonl` | solver-developer | approval-gate | `{hypothesis_id, algo, files, git_sha_before, implemented_at}` per line |
 | `verdicts.jsonl` | approval-gate | improvement-strategist (거절 원인 추적) | `{target_run, baseline_run, decision, ...}` per line |
 | `rejected.jsonl` | (사용자, REJECT 시) | improvement-strategist | `{hypothesis_id, why}` per line |
+
+각 JSONL 엔트리는 `algo` 필드로 어느 solver에 대한 기록인지 구분한다. `algo`가 없는
+legacy 엔트리는 `myalgorithm`(Hermes)으로 간주.
 
 모든 scratch 파일은 append-only. 기본적으로 gitignore 대상 — 커밋 여부는 사용자
 결정.
@@ -83,8 +105,11 @@ py -3.12 tools/check_env.py
 $env:PYTHONPATH = "C:\Users\ADMIN\Workspace\ogc2026\.codex_deps"
 $env:PYTHONIOENCODING = "utf-8"
 
-# 1. eval 실행.
-py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_*.json" --note "<context>"
+# 1. eval 실행. (algo에 맞는 러너 사용)
+#    Athena 벤치마크 (default):
+py -3.12 tools/parallel_eval.py --algo athena --timelimit 60 --pattern "*.json" --workers 6 --cores-per-worker 4 --note "<context>"
+#    Hermes (serial):
+py -3.12 tools/eval_runner.py --algo hermes --timelimit 30 --pattern "bench_*.json" --note "<context>"
 
 # 2. eval-analyst 호출.
 #    (Claude Code에서: "지난 run 정리해줘")
@@ -95,8 +120,8 @@ py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_*.json" --note "<c
 # 4. 하나 선택. 그리고:
 #    (Claude Code에서: "H-NNN 구현해줘")
 
-# 5. 같은 패턴으로 eval 재실행.
-py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_*.json" --note "post H-NNN"
+# 5. 같은 algo·같은 러너·같은 --workers/--cores-per-worker로 eval 재실행.
+py -3.12 tools/parallel_eval.py --algo athena --timelimit 60 --pattern "*.json" --workers 6 --cores-per-worker 4 --note "post H-NNN"
 
 # 6. Gate check.
 #    (Claude Code에서: "H-NNN 승인" 또는 "run <new> vs <prev> 비교")

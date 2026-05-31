@@ -1,8 +1,9 @@
-# `baseline/my_new_algorithm.py` 알고리즘 설명 자료
+# Athena Solver 알고리즘 설명 자료
 
 대상 독자: 자료구조, 알고리즘, 최적화 기초를 배운 공대 3학년  
 코드 이름: **Athena Solver**  
 핵심 아이디어: 먼저 빠른 휴리스틱으로 그럴듯한 배치를 만들고, 남은 시간 동안 Simulated Annealing으로 조금씩 개선한다.
+코드 위치: public entrypoint는 `baseline/my_new_algorithm.py`이고, 실제 구현은 `baseline/athena/` 패키지에 phase별로 나뉘어 있다.
 
 ---
 
@@ -59,6 +60,21 @@ flowchart TD
 3. 각 block에 대해 어떤 bay와 orientation이 좋아 보이는지 점수를 매긴다.
 4. target entry time 순서대로 block을 하나씩 실제 위치에 배치한다.
 5. Simulated Annealing으로 entry time, bay, 위치, 방향을 바꿔 보며 objective를 줄인다.
+
+### 코드 모듈 구조
+
+`baseline/my_new_algorithm.py`는 contest contract를 지키기 위한 얇은 compatibility shim이다. 평가 도구는 계속 이 파일의 `algorithm(prob_info, timelimit)`를 import하지만, 내부 구현은 다음 모듈로 분리되어 있다.
+
+- `baseline/athena/events.py`: structured event log
+- `baseline/athena/features.py`: feature precompute, global time-window smoothing
+- `baseline/athena/placement.py`: bay ranking, slot search, initial placement
+- `baseline/athena/solution.py`: operations 변환, official feasibility 호출
+- `baseline/athena/state.py`: incremental SA state, objective helpers
+- `baseline/athena/fast_checks.py`: incremental feasibility filter와 pair/crane cache
+- `baseline/athena/moves.py`: small/medium/large move 구현
+- `baseline/athena/sa.py`: SA profile, temperature, acceptance, `sa_loop`
+- `baseline/athena/parallel.py`: multi-start worker와 process orchestration
+- `baseline/athena/entrypoint.py`: public `algorithm` 본체
 
 ---
 
@@ -615,5 +631,4 @@ feasible solution 확보에는 좋지만, empty-bay window를 찾는 방식이�
 
 ## 16. 발표용 1분 요약
 
-`my_new_algorithm.py`의 Athena Solver는 block stowage scheduling 문제를 다섯 단계로 푸는 휴리스틱 알고리즘이다. 먼저 block과 orientation별 bounding box, 면적, bay fit 같은 feature를 미리 계산한다. 그 다음 시간축 workload가 한쪽에 몰리지 않도록 각 block의 target entry time을 정한다. 이후 bay preference, workload balance, bay fit을 기준으로 후보 bay와 orientation을 정렬하고, target entry 순서대로 block을 하나씩 sweep 배치한다. 이때 crane entry/exit, spatial collision, future entry/exit blocking을 검사해서 가능한 가장 이른 slot을 찾는다. 초기해가 실패하면 release_time 기반 fallback과 force placement로 feasible solution을 확보한다. 마지막으로 Simulated Annealing을 돌면서 entry time, orientation, bay, position을 바꾸거나 tardy block을 destroy-repair하여 objective를 개선한다. 모든 후보는 `check_feasibility`로 검증되므로 최종 출력 형식을 안정적으로 만족하도록 설계되어 있다.
-
+Athena Solver는 `baseline/my_new_algorithm.py` entrypoint와 `baseline/athena/` 내부 모듈로 구성되며, block stowage scheduling 문제를 다섯 단계로 푸는 휴리스틱 알고리즘이다. 먼저 block과 orientation별 bounding box, 면적, bay fit 같은 feature를 미리 계산한다. 그 다음 시간축 workload가 한쪽에 몰리지 않도록 각 block의 target entry time을 정한다. 이후 bay preference, workload balance, bay fit을 기준으로 후보 bay와 orientation을 정렬하고, target entry 순서대로 block을 하나씩 sweep 배치한다. 이때 crane entry/exit, spatial collision, future entry/exit blocking을 검사해서 가능한 가장 이른 slot을 찾는다. 초기해가 실패하면 release_time 기반 fallback과 force placement로 feasible solution을 확보한다. 마지막으로 Simulated Annealing을 돌면서 entry time, orientation, bay, position을 바꾸거나 tardy block을 destroy-repair하여 objective를 개선한다. 모든 후보는 `check_feasibility`로 검증되므로 최종 출력 형식을 안정적으로 만족하도록 설계되어 있다.
