@@ -198,7 +198,7 @@ block 하나를 놓을 때 가능한 `(bay, orientation)` 후보를 점수 순�
 
 ```text
 score = w3 * preference_penalty
-      + w2 * load_deviation
+      + w2 * load_imbalance
       + 1e-4 * area_room
 ```
 
@@ -212,9 +212,9 @@ block마다 bay 선호도가 있다. 가장 선호하는 bay와 비교해서 덜
 preference_penalty = max_preference - preference[bay]
 ```
 
-`load_deviation`
+`load_imbalance`
 
-해당 bay에 block workload를 추가했을 때 평균 bay load에서 얼마나 벗어나는지 본다. 특정 bay에 일이 몰리는 것을 막기 위한 항이다.
+해당 bay에 block workload를 추가했을 때 공식 obj2와 같은 area-weighted max-pairwise imbalance를 본다. 즉 SA와 최종 objective가 보는 `z2 = max |u_a * load_a - u_b * load_b|`와 같은 방향으로 초기 후보를 정렬한다.
 
 `area_room`
 
@@ -223,6 +223,7 @@ bay 면적에서 block footprint area를 뺀 값이다. 현재는 아주 작은 
 ### 중요한 점
 
 이 단계는 아직 실제 좌표를 정하지 않는다. "어떤 bay와 orientation부터 시도해 볼지" 순서를 정하는 단계다.
+초기 placement에서는 기본 bay 후보 cap이 4여도 `max(4, n_bays)`개를 보며, orientation 중복 때문에 특정 bay가 잘리지 않도록 distinct bay를 우선 보존한다. 그래서 B5처럼 bay 수가 작은 benchmark에서는 가능한 bay가 후보 cap 밖으로 밀릴 위험을 줄인다.
 
 ---
 
@@ -301,7 +302,7 @@ block을 어떤 순서로 쭉 훑으면서 하나씩 배치하는 방식이다. 
 
 ```text
 placement_score = w1 * tardiness
-                + w2 * max_load_deviation
+                + w2 * load_imbalance
                 + w3 * preference_penalty
                 + 1e-4 * top_y
 ```

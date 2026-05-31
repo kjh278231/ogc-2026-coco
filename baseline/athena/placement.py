@@ -42,6 +42,31 @@ def rank_bays_for_block(prob_info: dict, F: Features, bays: list[Bay],
     return out
 
 
+def _cap_ranked_bay_candidates(ranked: list[tuple[float, int, int]],
+                               cap: int) -> list[tuple[float, int, int]]:
+    """Keep the candidate list compact while preserving distinct bay coverage."""
+    if cap <= 0 or len(ranked) <= cap:
+        return ranked
+    selected: list[tuple[float, int, int]] = []
+    seen_bays: set[int] = set()
+    for cand in ranked:
+        bid = cand[1]
+        if bid in seen_bays:
+            continue
+        selected.append(cand)
+        seen_bays.add(bid)
+        if len(selected) >= cap:
+            return selected
+    selected_set = set(selected)
+    for cand in ranked:
+        if cand in selected_set:
+            continue
+        selected.append(cand)
+        if len(selected) >= cap:
+            break
+    return selected
+
+
 # -----------------------------------------------------------------------------
 # Phase 4 -- positional placement helpers
 # -----------------------------------------------------------------------------
@@ -218,6 +243,9 @@ def place_initial(prob_info: dict, F: Features, bays: list[Bay],
     # _bay_weights / _compute_z2) so the initial solution optimises the same
     # imbalance the SA + final objective scores.
     bay_weights = _bay_weights(bays)
+    # 1-C: do not prune away an entire bay on small/medium bay-count suites.
+    # B5 instances should try all 5 bays even when the historical default cap is 4.
+    effective_bay_cands_cap = max(bay_cands_cap, len(bays))
 
     def _area0(i: int) -> float:
         return F.area_top.get((i, target_orient[i]), 0.0)
@@ -250,7 +278,8 @@ def place_initial(prob_info: dict, F: Features, bays: list[Bay],
             ranked = rank_bays_for_block(prob_info, F, bays, bi, bay_loads,
                                           w1, w2, w3, bay_weights)
             # First pass: respect target_entry as soft lower bound
-            for _, bid, oi in ranked[:bay_cands_cap]:
+            capped_ranked = _cap_ranked_bay_candidates(ranked, effective_bay_cands_cap)
+            for _, bid, oi in capped_ranked:
                 if deadline is not None and time.time() >= deadline:
                     break
                 bay = bays[bid]
@@ -274,7 +303,7 @@ def place_initial(prob_info: dict, F: Features, bays: list[Bay],
 
             # Second pass: relax to release_time
             if best is None:
-                for _, bid, oi in ranked[:bay_cands_cap]:
+                for _, bid, oi in capped_ranked:
                     if deadline is not None and time.time() >= deadline:
                         break
                     bay = bays[bid]
