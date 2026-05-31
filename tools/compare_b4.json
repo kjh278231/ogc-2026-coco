@@ -1,0 +1,74 @@
+[
+  {
+    "instance": "bench_B4_b70_dense_geometry",
+    "algo": "hermes",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 5741.0,
+    "obj2": 1385.3500000000001,
+    "obj3": 0.0,
+    "total": 17234082.8,
+    "wall": 18.000330448150635,
+    "error": null
+  },
+  {
+    "instance": "bench_B4_b70_dense_geometry",
+    "algo": "greedy",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 1295.0,
+    "obj2": 658.4880902443173,
+    "obj3": 452.0,
+    "total": 3897047.9047219544,
+    "wall": 18.0548198223114,
+    "error": null
+  },
+  {
+    "instance": "bench_B4_b70_dense_geometry",
+    "algo": "athena",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 284.0,
+    "obj2": 188.04456273124367,
+    "obj3": 522.0,
+    "total": 861334.35650185,
+    "wall": 18.413654088974,
+    "error": null
+  },
+  {
+    "instance": "bench_B4_b90_crane_trap",
+    "algo": "hermes",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 5307.0,
+    "obj2": 685.6758021390376,
+    "obj3": 107.0,
+    "total": 18580219.054812834,
+    "wall": 18.0015549659729,
+    "error": null
+  },
+  {
+    "instance": "bench_B4_b90_crane_trap",
+    "algo": "greedy",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 2888.0,
+    "obj2": 837.4502739011349,
+    "obj3": 217.0,
+    "total": 10116279.701643407,
+    "wall": 18.090683698654175,
+    "error": null
+  },
+  {
+    "instance": "bench_B4_b90_crane_trap",
+    "algo": "athena",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 719.0,
+    "obj2": 193.51717751402134,
+    "obj3": 491.0,
+    "total": 2525026.103065084,
+    "wall": 18.406959295272827,
+    "error": null
+  }
+]

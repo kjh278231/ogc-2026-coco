@@ -1,0 +1,74 @@
+[
+  {
+    "instance": "bench_B3_b30_balanced",
+    "algo": "hermes",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 786.0,
+    "obj2": 569.4423846548768,
+    "obj3": 0.0,
+    "total": 2100248.096692584,
+    "wall": 18.00091791152954,
+    "error": null
+  },
+  {
+    "instance": "bench_B3_b30_balanced",
+    "algo": "greedy",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 0.0,
+    "obj2": 86.61619512124713,
+    "obj3": 82.0,
+    "total": 2246.31336584873,
+    "wall": 4.234189510345459,
+    "error": null
+  },
+  {
+    "instance": "bench_B3_b30_balanced",
+    "algo": "athena",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 0.0,
+    "obj2": 90.53436569506164,
+    "obj3": 30.0,
+    "total": 1233.7405598654314,
+    "wall": 18.403724431991577,
+    "error": null
+  },
+  {
+    "instance": "bench_B3_b50_tight_due",
+    "algo": "hermes",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 2806.0,
+    "obj2": 705.1066559656578,
+    "obj3": 0.0,
+    "total": 16839525.53327983,
+    "wall": 18.000240564346313,
+    "error": null
+  },
+  {
+    "instance": "bench_B3_b50_tight_due",
+    "algo": "greedy",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 111.0,
+    "obj2": 183.10512813375635,
+    "obj3": 172.0,
+    "total": 669495.5256406688,
+    "wall": 18.19454026222229,
+    "error": null
+  },
+  {
+    "instance": "bench_B3_b50_tight_due",
+    "algo": "athena",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 200.0,
+    "obj2": 178.61781878436375,
+    "obj3": 143.0,
+    "total": 1203038.0890939217,
+    "wall": 18.402756690979004,
+    "error": null
+  }
+]
