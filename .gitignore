@@ -27,6 +27,3 @@ tools/event_logs/
 tools/compare*.json
 tools/cmp_*.json
 tools/debug*.jsonl
-
-# Ad-hoc generated explanation draft
-MY_NEW_ALGORITHM_EXPLANATION.md
