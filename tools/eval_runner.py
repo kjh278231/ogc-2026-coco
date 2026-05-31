@@ -44,6 +44,32 @@ import myalgorithm  # noqa: E402
 import utils  # noqa: E402
 
 
+# --------------------------------------------------------------------------- #
+# Algorithm registry. Each entry maps a CLI label to the module that exports
+# `algorithm(prob_info, timelimit=...)` and the `algo` string recorded in the DB.
+# `hermes`/`myalgorithm` share the historical DB label "myalgorithm" so existing
+# baseline history and the approval gate keep matching. Athena gets its own label
+# so its results never pollute the Hermes pool. Modules are imported lazily so a
+# Hermes-only run never touches my_new_algorithm (and vice versa).
+# --------------------------------------------------------------------------- #
+ALGOS = {
+    "hermes": {"module": "myalgorithm", "db_label": "myalgorithm"},
+    "myalgorithm": {"module": "myalgorithm", "db_label": "myalgorithm"},
+    "athena": {"module": "my_new_algorithm", "db_label": "athena"},
+}
+
+
+def resolve_algo(algo: str):
+    """Return (module, db_label) for a CLI algo label. Imports the module lazily."""
+    import importlib
+    try:
+        spec = ALGOS[algo]
+    except KeyError:
+        raise SystemExit(
+            f"unknown --algo {algo!r}; choose one of {sorted(ALGOS)}")
+    return importlib.import_module(spec["module"]), spec["db_label"]
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     run_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,8 +191,11 @@ def parse_event_log(path: pathlib.Path) -> tuple[list[dict], dict]:
 
 
 def run_instance(instance_path: pathlib.Path, timelimit: float,
-                 event_log_path: pathlib.Path) -> dict:
-    """Run myalgorithm on one instance and return a result dict ready for DB insertion."""
+                 event_log_path: pathlib.Path, algo: str = "hermes") -> dict:
+    """Run the selected solver on one instance and return a result dict ready
+    for DB insertion. `algo` defaults to "hermes" so existing callers are
+    unchanged."""
+    algo_mod, _ = resolve_algo(algo)
     with open(instance_path, "r", encoding="utf-8") as f:
         prob_info = json.load(f)
 
@@ -184,14 +213,17 @@ def run_instance(instance_path: pathlib.Path, timelimit: float,
     }
     t0 = time.time()
     try:
-        sol = myalgorithm.algorithm(prob_info, timelimit=timelimit)
+        sol = algo_mod.algorithm(prob_info, timelimit=timelimit)
         result["wall_time"] = time.time() - t0
 
-        # myalgorithm.algorithm() restores utils patches on the happy path, but
-        # defensively reset them here in case an exception left them dangling.
-        utils.check_entry = myalgorithm.original_check_entry
-        utils.check_exit = myalgorithm.original_check_exit
-        utils.check_collisions = myalgorithm.original_check_collisions
+        # Hermes monkey-patches utils.* and restores on the happy path; defensively
+        # reset here in case an exception left them dangling. Athena does not patch
+        # utils globally (it imports the checkers by name), so only solvers that
+        # captured originals get reset.
+        if hasattr(algo_mod, "original_check_entry"):
+            utils.check_entry = algo_mod.original_check_entry
+            utils.check_exit = algo_mod.original_check_exit
+            utils.check_collisions = algo_mod.original_check_collisions
 
         chk = utils.check_feasibility(prob_info, sol)
         result["feasible"] = bool(chk.get("feasible"))
@@ -224,7 +256,12 @@ def main():
                     help="free-form note attached to this run (shown in summaries)")
     ap.add_argument("--bench-dir", type=str, default=str(BENCH_DIR),
                     help="directory containing benchmark instance JSON files")
+    ap.add_argument("--algo", type=str, default="hermes",
+                    choices=sorted(ALGOS),
+                    help="which solver to run (default hermes)")
     args = ap.parse_args()
+
+    _, db_label = resolve_algo(args.algo)
 
     bench = pathlib.Path(args.bench_dir)
     files = sorted(bench.glob(args.pattern))
@@ -249,7 +286,7 @@ def main():
     run_id = cur.lastrowid
     conn.commit()
     print(f"[eval_runner] run_id={run_id} sha={sha[:8] if sha else 'n/a'}"
-          f"{' (dirty)' if dirty else ''} files={len(files)} db={args.db}")
+          f"{' (dirty)' if dirty else ''} files={len(files)} algo={db_label} db={args.db}")
 
     run_log_dir = EVENT_LOG_DIR / f"run_{run_id}"
     run_log_dir.mkdir(parents=True, exist_ok=True)
@@ -258,7 +295,7 @@ def main():
         name = fp.stem
         log_path = run_log_dir / f"{name}.jsonl"
         print(f"[eval_runner] {name} ...", end=" ", flush=True)
-        result = run_instance(fp, args.timelimit, log_path)
+        result = run_instance(fp, args.timelimit, log_path, algo=args.algo)
         events, summary = parse_event_log(log_path)
 
         cur.execute(
@@ -269,7 +306,7 @@ def main():
                  init_heuristic, init_objective, fallback_triggered, error)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, name, "myalgorithm",
+            (run_id, name, db_label,
              None if result["feasible"] is None else int(result["feasible"]),
              result["stage"], result["obj1"], result["obj2"], result["obj3"],
              result["total_obj"], result["wall_time"],
@@ -284,7 +321,7 @@ def main():
                     (run_id, instance, algo, t, event, payload)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                [(run_id, name, "myalgorithm",
+                [(run_id, name, db_label,
                   rec.get("t", 0.0), rec.get("event", ""),
                   json.dumps({k: v for k, v in rec.items() if k not in ("t", "event")}))
                  for rec in events],

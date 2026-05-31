@@ -52,6 +52,9 @@ $env:PYTHONPATH = "C:\Users\ADMIN\Workspace\ogc2026\.codex_deps"
 $env:PYTHONIOENCODING = "utf-8"
 py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_B5_*.json" --note "<context>"
 
+# 기본 벤치마크 (별도 지정 없으면 이것 = Athena 병렬 전체 suite)
+py -3.12 tools/parallel_eval.py --algo athena --timelimit 60 --pattern "*.json" --note "<context>"
+
 # Geometry debug (stage 2/3/4 실패 분해)
 py -3.12 tools/geometry_debug.py --instance alg_tester/example/benchmark/<name>.json --probe-edd
 
@@ -61,6 +64,15 @@ py -3.12 alg_tester/example/generate_benchmark_suite.py --suite smoke
 
 테스트 프레임워크, lint 설정, 빌드 단계가 없다 — benchmark instance에 대한
 평가가 곧 테스트 loop이다.
+
+> **벤치마크 default**: 사용자가 알고리즘을 명시하지 않고 "벤치마크 수행"을
+> 요청하면 **Athena (`baseline/my_new_algorithm.py`)를 `parallel_eval.py`로
+> 병렬 실행**하는 것이 default다 (Hermes serial 아님). `eval_runner.py`와
+> `parallel_eval.py` 둘 다 `--algo {hermes|myalgorithm|athena}`를 받으며 CLI
+> 기본값은 backward-compat을 위해 `hermes`이므로 **`--algo athena`를 명시**해야
+> 한다. 결과는 DB에 `algo="athena"`로 Hermes pool과 분리 기록된다. A/B 비교는
+> 반드시 동일한 `--workers`/`--cores-per-worker`에서만 (parallel 대 serial 비교
+> 금지).
 
 ## Architecture
 
