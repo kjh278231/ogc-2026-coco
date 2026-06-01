@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-eval_summary.py -- compare a recent run against prior baseline runs.
+eval_summary.py -- compare a recent run against prior same-algo baseline runs.
 
 Reads the SQLite database populated by tools/eval_runner.py and prints a
 Markdown report of per-instance and aggregate differences.
@@ -19,6 +19,7 @@ Usage
     python tools/eval_summary.py
     python tools/eval_summary.py --target-run 5 --baseline-window 3
     python tools/eval_summary.py --instance-pattern "bench_"
+    python tools/eval_summary.py --algo athena
     python tools/eval_summary.py --db tools/ogc2026_runs.db
 """
 from __future__ import annotations
@@ -26,6 +27,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sqlite3
+import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_DB = REPO_ROOT / "tools" / "ogc2026_runs.db"
@@ -41,36 +43,82 @@ def fetch_run(conn: sqlite3.Connection, run_id: int):
     return cur.fetchone()
 
 
-def fetch_results(conn: sqlite3.Connection, run_id: int) -> dict:
-    """Return {instance_name: row_tuple} for myalgorithm rows of this run."""
+def fetch_algos(conn: sqlite3.Connection, run_id: int) -> list[str]:
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT DISTINCT algo FROM instance_results WHERE run_id = ? ORDER BY algo",
+        (run_id,),
+    )
+    return [r[0] for r in cur.fetchall()]
+
+
+def fetch_latest_run_id(conn: sqlite3.Connection, algo: str | None) -> int | None:
+    cur = conn.cursor()
+    if algo:
+        cur.execute(
+            """
+            SELECT MAX(r.run_id)
+            FROM runs r
+            JOIN instance_results ir ON ir.run_id = r.run_id
+            WHERE ir.algo = ?
+            """,
+            (algo,),
+        )
+    else:
+        cur.execute("SELECT MAX(run_id) FROM runs")
+    row = cur.fetchone()
+    return row[0] if row and row[0] is not None else None
+
+
+def fetch_results(conn: sqlite3.Connection, run_id: int, algo: str) -> dict:
+    """Return {instance_name: row_tuple} for one algo in one run."""
     cur = conn.cursor()
     cur.execute(
         """
         SELECT instance, feasible, stage, total_obj, wall_time,
                sa_iterations, sa_improvements, init_heuristic, fallback_triggered
         FROM instance_results
-        WHERE run_id = ? AND algo = 'myalgorithm'
+        WHERE run_id = ? AND algo = ?
         """,
-        (run_id,),
+        (run_id, algo),
     )
     return {r[0]: r for r in cur.fetchall()}
 
 
-def fetch_recent_run_ids(conn: sqlite3.Connection, limit: int) -> list[int]:
+def fetch_baseline_run_ids(
+    conn: sqlite3.Connection, target_id: int, algo: str, limit: int
+) -> list[int]:
     cur = conn.cursor()
-    cur.execute("SELECT run_id FROM runs ORDER BY run_id DESC LIMIT ?", (limit,))
+    cur.execute(
+        """
+        SELECT DISTINCT r.run_id
+        FROM runs r
+        JOIN instance_results ir ON ir.run_id = r.run_id
+        WHERE r.run_id < ? AND ir.algo = ?
+        ORDER BY r.run_id DESC
+        LIMIT ?
+        """,
+        (target_id, algo, limit),
+    )
     return [r[0] for r in cur.fetchall()]
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
     ap = argparse.ArgumentParser(
-        description="Summarize an OGC2026 evaluation run vs prior baseline runs."
+        description="Summarize an OGC2026 evaluation run vs prior same-algo runs."
     )
     ap.add_argument("--db", type=str, default=str(DEFAULT_DB))
     ap.add_argument("--target-run", type=int, default=None,
-                    help="run_id to summarize (default: most recent)")
+                    help="run_id to summarize (default: most recent run)")
+    ap.add_argument("--algo", type=str, default=None,
+                    help="DB algo label to summarize (default: auto-detect from target run)")
     ap.add_argument("--baseline-window", type=int, default=3,
-                    help="How many prior runs to use as the baseline pool (default: 3)")
+                    help="How many prior same-algo runs to use as the baseline pool (default: 3)")
     ap.add_argument("--instance-pattern", type=str, default=None,
                     help="Substring match against instance name (e.g. 'bench_')")
     args = ap.parse_args()
@@ -82,21 +130,37 @@ def main():
 
     conn = sqlite3.connect(str(db_path))
 
-    recent_ids = fetch_recent_run_ids(conn, limit=args.baseline_window + 5)
-    if not recent_ids:
+    target_id = args.target_run or fetch_latest_run_id(conn, args.algo)
+    if target_id is None:
         print("No runs in DB.")
         return
-
-    target_id = args.target_run or recent_ids[0]
     target_row = fetch_run(conn, target_id)
     if not target_row:
         print(f"run_id={target_id} not found.")
         return
 
-    baseline_ids = [r for r in recent_ids if r != target_id][:args.baseline_window]
-    target_results = fetch_results(conn, target_id)
+    target_algos = fetch_algos(conn, target_id)
+    if args.algo:
+        if args.algo not in target_algos:
+            print(f"run_id={target_id} has no rows for algo={args.algo!r}. "
+                  f"Available: {target_algos or 'none'}")
+            return
+        algo = args.algo
+    else:
+        if not target_algos:
+            print(f"run_id={target_id} has no instance_results rows.")
+            return
+        if len(target_algos) > 1:
+            print(f"run_id={target_id} contains multiple algos {target_algos}; "
+                  "rerun with --algo <label>.")
+            return
+        algo = target_algos[0]
+
+    baseline_ids = fetch_baseline_run_ids(
+        conn, target_id, algo, args.baseline_window)
+    target_results = fetch_results(conn, target_id, algo)
     baseline_runs_results: dict[int, dict] = {
-        r: fetch_results(conn, r) for r in baseline_ids
+        r: fetch_results(conn, r, algo) for r in baseline_ids
     }
 
     instances = set(target_results.keys())
@@ -116,14 +180,15 @@ def main():
           f"sha={sha_short}{' (dirty)' if target_row[3] else ''} "
           f"timelimit={target_row[4]}s pattern=`{target_row[5]}`"
           f"{' note=' + repr(target_row[6]) if target_row[6] else ''}")
+    print(f"- **Algo**: `{algo}`")
     if baseline_ids:
-        print(f"- **Baseline pool** (most-recent first): {baseline_ids}")
+        print(f"- **Baseline pool** (prior same-algo, most-recent first): {baseline_ids}")
     else:
-        print("- **Baseline pool**: _(none — this is the first run)_")
+        print("- **Baseline pool**: _(none - no prior same-algo runs)_")
     print()
 
     headers = ["Instance", "feasible", "obj (target)", "best baseline (run)",
-               "Δ vs best", "SA iters", "init", "fb"]
+               "delta vs best", "SA iters", "init", "fb"]
     print("| " + " | ".join(headers) + " |")
     print("| " + " | ".join(["---"] * len(headers)) + " |")
 
@@ -153,20 +218,20 @@ def main():
                     best_b = b_total
                     best_b_run = rid
 
-        delta_str = "—"
+        delta_str = "-"
         if t_feasible and t_total is not None and best_b is not None:
             delta = t_total - best_b
             pct = (delta / best_b * 100.0) if best_b else 0.0
             if delta < -1e-6:
-                arrow = "↓ better"
+                label = "better"
                 n_better += 1
             elif delta > 1e-6:
-                arrow = "↑ worse"
+                label = "worse"
                 n_worse += 1
             else:
-                arrow = "·"
+                label = "same"
                 n_same += 1
-            delta_str = f"{delta:+.2f} ({pct:+.1f}%) {arrow}"
+            delta_str = f"{delta:+.2f} ({pct:+.1f}%) {label}"
         elif t_feasible and best_b is None:
             delta_str = "_new feasible_"
             n_new_feasible += 1
@@ -174,15 +239,15 @@ def main():
             delta_str = "_FEASIBILITY LOST_"
             n_lost_feasible += 1
 
-        feas_str = "✓" if t_feasible else (
-            f"✗ stage={t_stage}" if t_stage else "✗"
+        feas_str = "OK" if t_feasible else (
+            f"FAIL stage={t_stage}" if t_stage else "FAIL"
         )
-        t_total_str = f"{t_total:.2f}" if t_total is not None else "—"
-        best_b_str = f"{best_b:.2f} (run {best_b_run})" if best_b is not None else "—"
+        t_total_str = f"{t_total:.2f}" if t_total is not None else "-"
+        best_b_str = f"{best_b:.2f} (run {best_b_run})" if best_b is not None else "-"
         sa_str = (
-            f"{t_sa}/{t_sa_imp or 0}" if t_sa is not None else "—"
+            f"{t_sa}/{t_sa_imp or 0}" if t_sa is not None else "-"
         )
-        init_str = t_init or "—"
+        init_str = t_init or "-"
         fb_str = "yes" if t_fb else ""
 
         print(f"| {inst} | {feas_str} | {t_total_str} | {best_b_str} | "
@@ -198,7 +263,7 @@ def main():
         bits.append(f"newly feasible: {n_new_feasible}")
     if n_lost_feasible:
         bits.append(f"feasibility LOST: **{n_lost_feasible}**")
-    print("**Aggregate** — " + " · ".join(bits))
+    print("**Aggregate** - " + " | ".join(bits))
 
     conn.close()
 

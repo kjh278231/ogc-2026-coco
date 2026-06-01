@@ -50,15 +50,18 @@ py -3.12 tools/check_env.py
 # Eval 실행 (경로 B 기준)
 $env:PYTHONPATH = "C:\Users\ADMIN\Workspace\ogc2026\.codex_deps"
 $env:PYTHONIOENCODING = "utf-8"
-py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_B5_*.json" --note "<context>"
+py -3.12 tools/eval_runner.py --timelimit 30 --pattern "prob_*.json" --note "<context>"
 
 # 기본 벤치마크 (별도 지정 없으면 이것 = Athena 병렬 전체 suite)
 py -3.12 tools/parallel_eval.py --algo athena --timelimit 60 --pattern "*.json" --note "<context>"
 
-# Geometry debug (stage 2/3/4 실패 분해)
-py -3.12 tools/geometry_debug.py --instance alg_tester/example/benchmark/<name>.json --probe-edd
+# Eval 요약 / DB 조회 (대상 run의 DB algo 자동 감지, 같은 algo의 과거 run만 비교)
+py -3.12 tools/eval_summary.py --target-run <run_id> --baseline-window 3
 
-# Benchmark suite 생성
+# Geometry debug (stage 2/3/4 실패 분해)
+py -3.12 tools/geometry_debug.py --instance training_set/prob_1.json --probe-edd
+
+# Synthetic/legacy benchmark suite 생성 (training_set 기본 평가와 별개)
 py -3.12 alg_tester/example/generate_benchmark_suite.py --suite smoke
 ```
 
@@ -74,6 +77,12 @@ py -3.12 alg_tester/example/generate_benchmark_suite.py --suite smoke
 > 한다. 결과는 DB에 `algo="athena"`로 Hermes pool과 분리 기록된다. A/B 비교는
 > 반드시 동일한 `--workers`/`--cores-per-worker`에서만 (parallel 대 serial 비교
 > 금지).
+>
+> **DB 조회 기본**: 결과 DB는 `tools/ogc2026_runs.db`이며 주요 테이블은 `runs`,
+> `instance_results`, `events`다. `tools/eval_summary.py`는 대상 run의
+> `instance_results.algo`를 자동 감지하고 `run_id < target_run`인 같은 `algo`의
+> 과거 run만 baseline으로 비교한다. Raw SQL은 Windows에서 `sqlite3` CLI가 없을 수
+> 있으므로 `py -3.12 -c "import sqlite3; ..."` 형태를 기본으로 쓴다.
 
 ## Architecture
 
@@ -153,15 +162,23 @@ contestant가 수정하면 안 된다고 명시함.
 
 ### Benchmark instances
 
-`alg_tester/example/` 구성:
+현재 평가/벤치마크의 canonical source는 repo root의 `training_set/`이다.
+`tools/eval_runner.py`, `tools/parallel_eval.py`, `tools/compare_algorithms.py`,
+`evaluate_all.py`의 기본 `--bench-dir`도 모두 이 디렉터리를 가리킨다.
+
+- `training_set/prob_1.json` ... `training_set/prob_20.json` — 현재 full
+  benchmark/training-set instance.
+
+`alg_tester/example/`는 예시와 synthetic instance 생성용으로 남아 있다.
 - `example_B2_b10.json` — 작은 시드 instance (2 bay, 10 block).
 - `generate_large_example.py`와 `generate_benchmark_suite.py` — `balanced`,
   `tight_due`, `dense_geometry`, `crane_trap`, `preference_skew`,
   `workload_balance` 같은 profile의 instance 생성기.
-- `benchmark/` — `evaluate_all.py`가 순회하는 생성된 suite.
+- `benchmark/` — generator 출력용 legacy/synthetic suite. 기본 eval 경로가
+  아니며, 필요할 때만 `--bench-dir alg_tester/example/benchmark`로 명시한다.
 
-파일 이름의 `B<n>` = bay 수; `b<n>` = block 수. `smoke_*`는 빠른 sanity
-instance; `bench_*`와 `my_B5_b200_hard.json`은 더 어려운 run.
+`training_set` 파일 이름은 `prob_<n>.json` 형식이다. 예전 synthetic suite의
+`B<n>`/`b<n>`, `smoke_*`, `bench_*` 명명은 legacy generator 산출물에만 적용된다.
 
 ## 답변 / 응답 언어 규칙
 

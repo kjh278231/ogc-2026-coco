@@ -14,15 +14,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "baseline"))
 
-INSTANCES = [
-    "bench_B3_b30_balanced.json",
-    "bench_B3_b50_tight_due.json",
-    "bench_B4_b70_dense_geometry.json",
-    "bench_B4_b90_crane_trap.json",
-    "bench_B5_b120_preference_skew.json",
-    "bench_B5_b150_mixed_hard.json",
-    "my_B5_b200_hard.json",
-]
+INSTANCES = [f"prob_{i}.json" for i in range(1, 21)]
 
 
 def run_once(alg, check_feasibility, prob_info, timelimit, workers, seed,
@@ -45,8 +37,7 @@ def main():
 
     timelimit = float(sys.argv[1]) if len(sys.argv) > 1 else 20.0
     repeats = int(sys.argv[2]) if len(sys.argv) > 2 else 4
-    base = os.path.join(os.path.dirname(__file__), "..", "alg_tester",
-                        "example", "benchmark")
+    base = os.path.join(os.path.dirname(__file__), "..", "training_set")
     print(f"cpu_count={os.cpu_count()} timelimit={timelimit} repeats={repeats}\n")
 
     # configs: ("label", workers, mode). Only single vs diverse-4 now.

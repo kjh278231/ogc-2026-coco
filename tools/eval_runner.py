@@ -8,9 +8,8 @@ to compare consecutive runs and detect regressions.
 
 Usage
 -----
-    python tools/eval_runner.py --timelimit 60 --pattern "bench_*.json"
-    python tools/eval_runner.py --timelimit 30 --pattern "smoke_*.json" --note "post track A"
-    python tools/eval_runner.py --timelimit 60 --pattern "my_B5_b200_hard.json" --note "track A regress check"
+    python tools/eval_runner.py --timelimit 60 --pattern "prob_*.json"
+    python tools/eval_runner.py --timelimit 30 --pattern "prob_1.json" --note "post track A"
 
 The runner sets the OGC2026_EVENT_LOG environment variable to a per-instance
 JSONL path before calling myalgorithm.algorithm(), then parses the resulting
@@ -33,7 +32,7 @@ from datetime import datetime, timezone
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASELINE_DIR = REPO_ROOT / "baseline"
-BENCH_DIR = REPO_ROOT / "alg_tester" / "example" / "benchmark"
+BENCH_DIR = REPO_ROOT / "training_set"
 DEFAULT_DB = REPO_ROOT / "tools" / "ogc2026_runs.db"
 EVENT_LOG_DIR = REPO_ROOT / "tools" / "event_logs"
 

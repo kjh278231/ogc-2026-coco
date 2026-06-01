@@ -36,10 +36,10 @@ in the delta, but a parallel run is NOT comparable to an old serial run.
 Usage
 -----
     # default: 6 workers x 4 cores on a 24-core machine, merged into the DB
-    python tools/parallel_eval.py --timelimit 30 --pattern "bench_*.json" --note "..."
+    python tools/parallel_eval.py --timelimit 30 --pattern "prob_*.json" --note "..."
 
     # override worker count explicitly
-    python tools/parallel_eval.py --workers 4 --timelimit 60 --pattern "smoke_*.json"
+    python tools/parallel_eval.py --workers 4 --timelimit 60 --pattern "prob_*.json"
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ from datetime import datetime, timezone
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 TOOLS_DIR = REPO_ROOT / "tools"
-BENCH_DIR = REPO_ROOT / "alg_tester" / "example" / "benchmark"
+BENCH_DIR = REPO_ROOT / "training_set"
 DEFAULT_DB = TOOLS_DIR / "ogc2026_runs.db"
 EVENT_LOG_DIR = TOOLS_DIR / "event_logs"
 

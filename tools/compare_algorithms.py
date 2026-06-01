@@ -3,7 +3,7 @@
 compare_algorithms.py -- run multiple algorithms on the same benchmark
 instances and print a side-by-side comparison table.
 
-Reads benchmark JSONs from alg_tester/example/benchmark/, runs the three
+Reads benchmark JSONs from training_set/, runs the three
 solvers (Hermes / myalgorithm, baseline_greedy, Athena / my_new_algorithm),
 collects feasibility + objective + wall_time, and prints a table.
 
@@ -12,8 +12,8 @@ does NOT modify any of the algorithms.
 
 Usage
 -----
-    py -3.12 tools/compare_algorithms.py --timelimit 20 --pattern "smoke_*.json"
-    py -3.12 tools/compare_algorithms.py --timelimit 30 --pattern "bench_*.json"
+    py -3.12 tools/compare_algorithms.py --timelimit 20 --pattern "prob_1.json"
+    py -3.12 tools/compare_algorithms.py --timelimit 30 --pattern "prob_*.json"
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ import traceback
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 BASELINE = REPO / "baseline"
-BENCH = REPO / "alg_tester" / "example" / "benchmark"
+BENCH = REPO / "training_set"
 
 sys.path.insert(0, str(BASELINE))
 
@@ -98,7 +98,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--timelimit", type=float, default=15.0,
                     help="per-instance wall-clock limit (seconds)")
-    ap.add_argument("--pattern", type=str, default="smoke_*.json",
+    ap.add_argument("--pattern", type=str, default="prob_*.json",
                     help="glob pattern (against --bench-dir) for instance JSON files")
     ap.add_argument("--bench-dir", type=str, default=str(BENCH))
     ap.add_argument("--out", type=str, default="",

@@ -20,8 +20,8 @@ Two input modes
 ---------------
   --solution PATH        : drill an already-built solution JSON
   --probe-edd            : run baseline_greedy._place_blocks with EDD sort and
-                           NO _repair, capturing the raw greedy failure that
-                           triggers stage-2 in run_2/run_3 bench_B5 instances.
+                           NO _repair, capturing the raw greedy failure path
+                           on a training_set instance.
 
 Output is plain text with markdown-style headers so the geometry-debug skill
 can paraphrase / table-format it.
@@ -329,7 +329,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--instance", required=True, type=pathlib.Path,
-                    help="Instance JSON path (alg_tester/example/benchmark/*.json)")
+                    help="Instance JSON path (training_set/prob_*.json)")
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--solution", type=pathlib.Path,
                      help="Solution JSON path (e.g. dumped from a failed run)")

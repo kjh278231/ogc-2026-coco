@@ -163,17 +163,17 @@ def main() -> int:
 
     # ---- Benchmark instances ----
     section("Benchmark instances")
-    bench_dir = REPO / "alg_tester" / "example" / "benchmark"
+    bench_dir = REPO / "training_set"
     if bench_dir.exists():
-        n_files = sum(1 for p in bench_dir.glob("*.json"))
+        n_files = sum(1 for p in bench_dir.glob("prob_*.json"))
         if n_files > 0:
-            line(f"alg_tester/example/benchmark/  ({n_files} *.json)", "OK")
+            line(f"training_set/  ({n_files} prob_*.json)", "OK")
         else:
-            line("alg_tester/example/benchmark/", "WARN",
-                 "no instances; run `py -3.12 alg_tester/example/generate_benchmark_suite.py --suite smoke`")
+            line("training_set/", "WARN",
+                 "no benchmark instances found; expected training_set/prob_*.json")
     else:
-        line("alg_tester/example/benchmark/", "FAIL",
-             "directory missing; instance generator not yet run")
+        line("training_set/", "FAIL",
+             "directory missing; benchmark instances should live here")
 
     # ---- Summary ----
     print()

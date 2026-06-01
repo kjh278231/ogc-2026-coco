@@ -12,18 +12,18 @@ py -3.12 tools/check_env.py
 # 2) eval 실행 (가장 흔한 명령)
 $env:PYTHONPATH = "C:\Users\ADMIN\Workspace\ogc2026\.codex_deps"
 $env:PYTHONIOENCODING = "utf-8"
-py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_B5_*.json" --note "<context>"
+py -3.12 tools/eval_runner.py --timelimit 30 --pattern "prob_*.json" --note "<context>"
 
 # 3) Geometry debug (실패 원인 분해)
 $env:PYTHONPATH = "C:\Users\ADMIN\Workspace\ogc2026\.codex_deps"
 $env:PYTHONIOENCODING = "utf-8"
-py -3.12 tools/geometry_debug.py --instance alg_tester/example/benchmark/bench_B5_b120_preference_skew.json --probe-edd
+py -3.12 tools/geometry_debug.py --instance training_set/prob_1.json --probe-edd
 ```
 
 bash (Git Bash, WSL 등)에서는 동일한 명령:
 
 ```bash
-PYTHONPATH=.codex_deps PYTHONIOENCODING=utf-8 py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_B5_*.json"
+PYTHONPATH=.codex_deps PYTHONIOENCODING=utf-8 py -3.12 tools/eval_runner.py --timelimit 30 --pattern "prob_*.json"
 ```
 
 이게 안 먹히면 §4 Troubleshooting 참고.
@@ -62,7 +62,7 @@ shim이 conda env의 같은 패키지와 충돌한다.
 활성화된 conda env 안에서는:
 
 ```bash
-python tools/eval_runner.py --timelimit 30 --pattern "bench_B5_*.json"
+python tools/eval_runner.py --timelimit 30 --pattern "prob_*.json"
 ```
 
 `py -3.12` 대신 그냥 `python`.
@@ -143,20 +143,29 @@ py -3.12 tools/check_env.py
 $env:PYTHONPATH = "C:\Users\ADMIN\Workspace\ogc2026\.codex_deps"
 $env:PYTHONIOENCODING = "utf-8"
 
-# bench_B5 hard instance
-py -3.12 tools/eval_runner.py --timelimit 30 --pattern "bench_B5_*.json" --note "<context>"
+# training_set 전체
+py -3.12 tools/eval_runner.py --timelimit 30 --pattern "prob_*.json" --note "<context>"
 
-# Smoke (빠른 sanity)
-py -3.12 tools/eval_runner.py --timelimit 30 --pattern "smoke_*.json" --note "smoke"
+# 단일 training_set instance (빠른 sanity)
+py -3.12 tools/eval_runner.py --timelimit 30 --pattern "prob_1.json" --note "sanity"
 
 # 단일 instance
-py -3.12 tools/eval_runner.py --timelimit 60 --pattern "my_B5_b200_hard.json"
+py -3.12 tools/eval_runner.py --timelimit 60 --pattern "prob_20.json"
 ```
 
-### Eval 요약 (run N과 baseline window 비교)
+### Eval 요약 (run N과 same-algo baseline window 비교)
+
+`tools/eval_summary.py`는 대상 run의 `instance_results.algo`를 자동 감지하고,
+`run_id < target_run`인 같은 `algo`의 과거 run만 baseline pool로 사용한다.
+`--target-run`을 생략하면서 특정 solver의 최신 run을 보고 싶으면 `--algo`를
+명시한다.
 
 ```powershell
-py -3.12 tools/eval_summary.py --target-run 3 --baseline-window 3
+# 특정 run 요약 (DB algo 자동 감지)
+py -3.12 tools/eval_summary.py --target-run <run_id> --baseline-window 3
+
+# 특정 algo의 최신 run 요약
+py -3.12 tools/eval_summary.py --algo athena --baseline-window 3
 ```
 
 ### Geometry debug (stage 2/3/4 실패 분해)
@@ -166,10 +175,10 @@ $env:PYTHONPATH = "C:\Users\ADMIN\Workspace\ogc2026\.codex_deps"
 $env:PYTHONIOENCODING = "utf-8"
 
 # 모드 A: 이미 만들어진 solution을 분석
-py -3.12 tools/geometry_debug.py --instance alg_tester/example/benchmark/bench_B5_b120_preference_skew.json --solution path/to/sol.json
+py -3.12 tools/geometry_debug.py --instance training_set/prob_1.json --solution path/to/sol.json
 
 # 모드 B: raw EDD greedy로 probe (repair 없음)
-py -3.12 tools/geometry_debug.py --instance alg_tester/example/benchmark/bench_B5_b120_preference_skew.json --probe-edd --probe-budget 10 --dump-solution tools/debug_dumps/b120_edd_raw.json
+py -3.12 tools/geometry_debug.py --instance training_set/prob_1.json --probe-edd --probe-budget 10 --dump-solution tools/debug_dumps/prob_1_edd_raw.json
 ```
 
 ### SQLite MCP server (Claude Code가 자동 호출, 수동 디버그용)
@@ -181,10 +190,29 @@ py -3.12 tools/run_sqlite_mcp.py --db-path tools/ogc2026_runs.db
 Stdio MCP 프로토콜로 응답하므로 수동 호출은 디버깅 용도. 등록은
 `.mcp.json`에서.
 
-### DB 빠른 쿼리 (MCP가 아닌 sqlite3 CLI)
+### DB 빠른 쿼리 (MCP가 아닌 Python sqlite3 모듈)
+
+SQLite DB는 `tools/ogc2026_runs.db`이고 주요 테이블은 다음 세 개다.
+
+- `runs`: `run_id`, `started_at`, `git_sha`, `git_dirty`, `timelimit`,
+  `pattern`, `hostname`, `python_version`, `note`
+- `instance_results`: `run_id`, `instance`, `algo`, `feasible`, `stage`,
+  `obj1`, `obj2`, `obj3`, `total_obj`, `wall_time`, `sa_iterations`,
+  `sa_improvements`, `init_heuristic`, `init_objective`,
+  `fallback_triggered`, `error`
+- `events`: `run_id`, `instance`, `algo`, `t`, `event`, `payload`
+
+아래 예시는 `run_id=26`, `algo='athena'` 기준이며 값만 바꿔서 사용한다.
 
 ```powershell
-py -3.12 -c "import sqlite3; c=sqlite3.connect('tools/ogc2026_runs.db'); [print(r) for r in c.execute('SELECT run_id, started_at, note FROM runs ORDER BY run_id')]"
+# 최근 run 목록
+py -3.12 -c "import sqlite3; c=sqlite3.connect('tools/ogc2026_runs.db'); [print(r) for r in c.execute('SELECT run_id, started_at, timelimit, pattern, note FROM runs ORDER BY run_id DESC LIMIT 10')]"
+
+# run에 기록된 DB algo label 확인
+py -3.12 -c "import sqlite3; c=sqlite3.connect('tools/ogc2026_runs.db'); [print(r) for r in c.execute('SELECT DISTINCT algo FROM instance_results WHERE run_id=?', (26,))]"
+
+# 특정 run/algo의 instance별 결과
+py -3.12 -c "import sqlite3; c=sqlite3.connect('tools/ogc2026_runs.db'); [print(r) for r in c.execute('SELECT instance, feasible, stage, total_obj FROM instance_results WHERE run_id=? AND algo=? ORDER BY instance', (26, 'athena'))]"
 ```
 
 ---
@@ -197,6 +225,7 @@ py -3.12 -c "import sqlite3; c=sqlite3.connect('tools/ogc2026_runs.db'); [print(
 | `C:\Users\ADMIN\AppData\Roaming\Python\Python312\site-packages\` | `pip install --user`로 들어간 패키지 (mcp-server-sqlite 등) |
 | `C:\Users\ADMIN\AppData\Roaming\Python\Python312\Scripts\` | `pip install --user`의 .exe shim (PATH에 없으면 직접 호출) |
 | `<repo>/.codex_deps/` | shapely + numpy vendored shim (Python 3.12 cp312 전용) |
+| `<repo>/training_set/` | 기본 benchmark/training-set instance (`prob_*.json`) |
 | `<repo>/tools/event_logs/run_<N>/` | eval_runner가 만든 per-instance JSONL trace |
 | `<repo>/tools/ogc2026_runs.db` | SQLite 결과 저장소 |
 
@@ -221,7 +250,7 @@ py -3.12 tools/check_env.py
 # 5. 첫 eval
 $env:PYTHONPATH = "$PWD\.codex_deps"
 $env:PYTHONIOENCODING = "utf-8"
-py -3.12 tools/eval_runner.py --timelimit 30 --pattern "smoke_*.json" --note "first run"
+py -3.12 tools/eval_runner.py --timelimit 30 --pattern "prob_1.json" --note "first run"
 ```
 
 `.codex_deps/`가 repo에 함께 들어있으므로 추가 pip install이 필요 없다.

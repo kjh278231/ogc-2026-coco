@@ -21,11 +21,14 @@ def main():
                         help="time limit for baseline greedy (default: 10.0)")
     parser.add_argument("--pattern", type=str, default="*.json",
                         help="glob pattern for benchmark files (default: *.json)")
+    parser.add_argument("--bench-dir", type=str,
+                        default=str(pathlib.Path(__file__).parent / "training_set"),
+                        help="directory containing benchmark instance JSON files")
     parser.add_argument("--output", type=str, default=None,
                         help="path to save the evaluation results in JSON format (default: None)")
     args = parser.parse_args()
 
-    benchmark_dir = pathlib.Path(__file__).parent / "alg_tester" / "example" / "benchmark"
+    benchmark_dir = pathlib.Path(args.bench_dir)
     json_files = sorted(benchmark_dir.glob(args.pattern))
     
     if not json_files:
