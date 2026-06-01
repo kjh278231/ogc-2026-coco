@@ -12,6 +12,7 @@ tools/debug_dumps/
 
 # Per-user Claude Code permissions
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # Claude Code scratchpad (hypothesis history, verdicts — useful for the
 # strategist/gate's running memory but not historically interesting)
