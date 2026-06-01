@@ -63,7 +63,9 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
     _emit("athena.smoothing.done", elapsed=round(time.time() - t_start, 3))
 
     # Phase 4 (uses phase 3 ranker internally)
-    init_deadline = min(hard_deadline - safety, t_start + max(2.0, timelimit * 0.30))
+    init_fraction = 0.45 if n >= 150 else 0.35
+    init_deadline = min(hard_deadline - safety,
+                        t_start + max(2.0, timelimit * init_fraction))
     assignments, n_forced, n_unplaced = place_initial(
         prob_info, F, bays,
         target_entry, target_orient,

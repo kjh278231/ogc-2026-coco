@@ -276,7 +276,9 @@ def _safe_serial_place_after_all(bi: int, prob_info: dict, F: Features,
     p = int(blk["processing_time"])
     prefs = blk["bay_preferences"]
     order = bay_order or sorted(range(len(bays)), key=lambda j: prefs[j], reverse=True)
-    for bid in order:
+    best_key: tuple | None = None
+    best: tuple | None = None
+    for order_idx, bid in enumerate(order):
         bay = bays[bid]
         for oi in range(len(blk["shape"])):
             pos = _safe_anchor_position(bi, oi, prob_info, F, bay)
@@ -285,8 +287,18 @@ def _safe_serial_place_after_all(bi: int, prob_info: dict, F: Features,
             x, y = pos
             e = max(r, max((end for _, end in bay_schedule[bid]), default=r))
             e = _empty_bay_entry(bay_schedule[bid], e, p)
-            return (bid, int(x), int(y), oi, int(e), int(e + p))
-    return None
+            exit_t = e + p
+            key = (
+                max(0, exit_t - int(blk["due_date"])),
+                exit_t,
+                order_idx,
+                -prefs[bid],
+                oi,
+            )
+            if best_key is None or key < best_key:
+                best_key = key
+                best = (bid, int(x), int(y), oi, int(e), int(exit_t))
+    return best
 
 
 def _safe_fallback_place(bi: int, prob_info: dict, F: Features, bays: list[Bay],
