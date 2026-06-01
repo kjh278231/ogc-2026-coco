@@ -87,14 +87,48 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
     n = len(blocks)
     tardy = []
     for bi, a in assignments.items():
-        if a["exit_time"] > blocks[bi]["due_date"]:
-            tardy.append(bi)
+        lateness = a["exit_time"] - blocks[bi]["due_date"]
+        if lateness > 0:
+            tardy.append((lateness, bi))
     if not tardy:
         k = max(1, n // 15)
-        tardy = random.sample(list(assignments.keys()), min(k, n))
-    # destroy a subset
-    destroy_size = max(1, min(len(tardy), n // 10))
-    destroyed = set(random.sample(tardy, destroy_size))
+        seed_blocks = random.sample(list(assignments.keys()), min(k, n))
+    else:
+        tardy.sort(reverse=True)
+        destroy_size = max(1, min(len(tardy), n // 10))
+        pool = [bi for _, bi in tardy[:max(destroy_size * 3, destroy_size)]]
+        keep_worst = max(1, destroy_size // 2)
+        seed_blocks = [bi for _, bi in tardy[:keep_worst]]
+        remaining = [bi for bi in pool if bi not in seed_blocks]
+        if remaining and len(seed_blocks) < destroy_size:
+            seed_blocks.extend(random.sample(
+                remaining, min(len(remaining), destroy_size - len(seed_blocks))
+            ))
+
+    # Destroy the tardy seeds plus nearby same-bay blockers. Reordering only
+    # the tardy blocks rarely opens an earlier slot when the bay timeline is
+    # already dense.
+    destroyed = set(seed_blocks)
+    destroy_limit = max(
+        len(destroyed),
+        min(n // 6, len(seed_blocks) + max(2, len(seed_blocks) // 2)),
+    )
+    for bi in list(seed_blocks):
+        if len(destroyed) >= destroy_limit:
+            break
+        a = assignments[bi]
+        r = int(blocks[bi]["release_time"])
+        same_bay = []
+        for bj, aj in assignments.items():
+            if bj in destroyed or aj["bay_id"] != a["bay_id"]:
+                continue
+            if aj["entry_time"] <= a["exit_time"] and aj["exit_time"] >= r:
+                same_bay.append((abs(aj["entry_time"] - a["entry_time"]), bj))
+        same_bay.sort()
+        for _, bj in same_bay:
+            destroyed.add(bj)
+            if len(destroyed) >= destroy_limit:
+                break
 
     # rebuild local bay state without destroyed blocks
     bay_placed: list[list[Block]] = [[] for _ in bays]
@@ -113,8 +147,18 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
         bay_schedule[a["bay_id"]].append((a["entry_time"], a["exit_time"]))
         bay_loads[a["bay_id"]] += blocks[bi]["workload"]
 
-    # reinsert destroyed blocks in EDD order (one-shot best-fit)
-    repair_order = sorted(destroyed, key=lambda bi: blocks[bi]["due_date"])
+    # Reinsert urgent/tardy blocks first; this is where the temporal
+    # neighborhood destroy gets a chance to change bay order.
+    def _repair_key(bi: int) -> tuple[int, int, int]:
+        blk = blocks[bi]
+        old = assignments[bi]
+        slack = (int(blk["due_date"]) - int(blk["release_time"])
+                 - int(blk["processing_time"]))
+        old_late = max(0, int(old["exit_time"]) - int(blk["due_date"]))
+        return (slack, int(blk["due_date"]), -old_late)
+
+    repair_order = sorted(destroyed, key=_repair_key)
+    bay_weights = _bay_weights(bays)
     for bi in repair_order:
         if deadline is not None and time.time() >= deadline:
             break
@@ -124,15 +168,15 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
         due = int(blk["due_date"])
         prefs = blk["bay_preferences"]
         s_max = max(prefs)
-        bay_weights = _bay_weights(bays)
         ranked = rank_bays_for_block(prob_info, F, bays, bi, bay_loads, w1, w2, w3,
                                       bay_weights, bay_schedule, r, p, due)
         best_score = float("inf")
         best = None
-        for _, bid, oi in ranked[:3]:
+        bay_cap = max(3, min(5, len(bays)))
+        for _, bid, oi in ranked[:bay_cap]:
             bay = bays[bid]
             blk_bb = F.aabb[(bi, oi)]
-            cands = _candidate_positions(bay, blk_bb, bay_placed[bid])[:8]
+            cands = _candidate_positions(bay, blk_bb, bay_placed[bid])[:10]
             for cx, cy in cands:
                 new_blk = Block(block_id=bi, block_data=blk, x=cx, y=cy, orient_idx=oi)
                 if not bay.contains_block(new_blk):
@@ -143,7 +187,8 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
                     continue
                 tard = max(0, e_t - due)
                 score = _placement_score(tard, blk["workload"], bay_loads, bid,
-                                          s_max - prefs[bid], cy + blk_bb[3], w1, w2, w3)
+                                          s_max - prefs[bid], cy + blk_bb[3],
+                                          w1, w2, w3, bay_weights)
                 if score < best_score:
                     best_score = score
                     best = (bid, cx, cy, oi, e, e_t)

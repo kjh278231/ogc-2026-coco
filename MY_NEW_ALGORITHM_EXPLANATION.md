@@ -390,13 +390,18 @@ bay load imbalance나 preference penalty를 줄이는 데 도움이 될 수 있�
 
 #### Large move
 
-확률 약 12%로 선택된다.
+작은 instance의 balanced profile에서는 12%로 선택되고, 큰 instance에서는
+`_adaptive_move_probs`에 따라 더 자주 선택된다.
 
-- tardy block 또는 일부 block을 제거한다.
+- tardiness가 큰 block을 우선 seed로 고른다.
+- seed와 같은 bay의 시간상 가까운 이웃 block도 일부 함께 제거한다.
 - 남은 block으로 bay 상태를 다시 만든다.
-- 제거한 block을 EDD 순서로 다시 sweep-repair한다.
+- 제거한 block을 slack, due date, 기존 tardiness 기준으로 다시 sweep-repair한다.
 
-large move는 구조적으로 꼬인 배치를 풀기 위한 destroy-and-repair 방식이다.
+large move는 구조적으로 꼬인 배치를 풀기 위한 destroy-and-repair 방식이다. tardy
+block만 빼서 다시 넣으면 이미 같은 bay 앞쪽에 고정된 block 때문에 더 이른 slot이
+열리지 않는 경우가 많다. 그래서 큰 instance에서는 temporal neighborhood를 함께
+destroy해서 bay 내부 순서가 실제로 바뀔 여지를 만든다.
 
 ### Accept rule
 
@@ -446,8 +451,22 @@ P(accept) = exp(-(obj - curr_obj) / T)
 | bay_reassign | 35 / 50 / 15 | 0.75 | 0.998 | 1.0 |
 | local_position | 70 / 20 / 10 | 0.25 | 0.999 | 0.7 |
 
-profile 0(balanced)은 기존 단일 SA와 동일한 move 비율이므로, worker 1개로 돌리면
-예전과 같은 동작이 된다. 각 worker는 random seed도 서로 다르다.
+위 표는 작은 instance에서의 기본 비율이다. `n_blocks >= 120`인 큰 instance에서는
+`sa_loop`가 `_adaptive_move_probs`로 effective move 비율을 조정한다. 목적은
+작은/중간 move만으로 풀기 어려운 같은 bay 시간 혼잡을 destroy-repair 성격의
+large move가 더 자주 건드리게 하는 것이다.
+
+큰 instance에서의 effective large 비중:
+
+| 조건 | balanced | large_repair | bay_reassign | local_position |
+| --- | ---: | ---: | ---: | ---: |
+| `120 <= n_blocks < 180` | 28% | 45% | 28% | 18% |
+| `n_blocks >= 180` | 32% | 50% | 32% | 22% |
+
+profile 0(balanced)은 작은 instance에서는 기존 단일 SA와 동일한 move 비율이므로,
+worker 1개로 작은 benchmark를 돌리면 예전과 같은 동작이 된다. 각 worker는 random
+seed도 서로 다르다. 실제 적용된 move cutoffs는 `sa.temperature.init` event의
+`move_probs`에 기록된다.
 
 구현상 주의점:
 

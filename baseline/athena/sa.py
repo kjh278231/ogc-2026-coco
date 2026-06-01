@@ -148,6 +148,35 @@ def _resolve_profile(profile: dict | None) -> dict:
     merged.update(profile)
     return merged
 
+
+def _adaptive_move_probs(profile: dict, n_blocks: int) -> tuple[float, float]:
+    """Increase destroy-repair exposure on large dense instances.
+
+    Returns cumulative cutoffs: (small_cut, medium_cut). Large probability is
+    1 - medium_cut.
+    """
+    base = profile["move_probs"]
+    if n_blocks < 120 or not profile.get("adaptive_large_moves", True):
+        return base
+
+    name = profile.get("name")
+    if n_blocks >= 180:
+        overrides = {
+            "balanced": (0.42, 0.68),       # large 32%
+            "large_repair": (0.28, 0.50),   # large 50%
+            "bay_reassign": (0.30, 0.68),   # large 32%
+            "local_position": (0.55, 0.78), # large 22%
+        }
+    else:
+        overrides = {
+            "balanced": (0.45, 0.72),       # large 28%
+            "large_repair": (0.32, 0.55),   # large 45%
+            "bay_reassign": (0.32, 0.72),   # large 28%
+            "local_position": (0.58, 0.82), # large 18%
+        }
+    return overrides.get(name, base)
+
+
 def sa_loop(prob_info: dict, F: Features, bays: list[Bay],
             w1: float, w2: float, w3: float,
             assignments: dict, deadline: float,
@@ -166,7 +195,6 @@ def sa_loop(prob_info: dict, F: Features, bays: list[Bay],
     profile is used, which reproduces the historical single-start behaviour.
     """
     prof = _resolve_profile(profile)
-    p_small_cut, p_medium_cut = prof["move_probs"]
     bay_change_prob = prof["bay_change_prob"]
     profile_cooling = prof["cooling"]
     t0_scale = prof["t0_scale"]
@@ -177,6 +205,8 @@ def sa_loop(prob_info: dict, F: Features, bays: list[Bay],
     n_blocks = len(state.assignments)
     base_full_period = full_check_period or _adaptive_full_check_period(n_blocks)
     current_full_period = base_full_period
+    p_small_cut, p_medium_cut = _adaptive_move_probs(prof, n_blocks)
+    large_prob = max(0.0, 1.0 - p_medium_cut)
 
     # ---- initial baseline via full checker -------------------------------
     init_dict = state_to_assignments_dict(state)
@@ -207,7 +237,8 @@ def sa_loop(prob_info: dict, F: Features, bays: list[Bay],
     _emit("sa.temperature.init",
           T0=T0, T_min=T_min, cooling=cooling,
           base_full_period=base_full_period,
-          n_blocks=n_blocks, profile=prof["name"])
+          n_blocks=n_blocks, profile=prof["name"],
+          move_probs=[p_small_cut, p_medium_cut, large_prob])
 
     iters = 0
     improvements = 0
