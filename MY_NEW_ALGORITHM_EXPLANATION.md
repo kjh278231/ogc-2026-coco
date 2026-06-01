@@ -199,6 +199,7 @@ block 하나를 놓을 때 가능한 `(bay, orientation)` 후보를 점수 순�
 ```text
 score = w3 * preference_penalty
       + w2 * load_imbalance
+      + alpha * w1 * temporal_tardiness_proxy
       + 1e-4 * area_room
 ```
 
@@ -219,6 +220,10 @@ preference_penalty = max_preference - preference[bay]
 `area_room`
 
 bay 면적에서 block footprint area를 뺀 값이다. 현재는 아주 작은 weight `1e-4`만 붙어 있으므로 tie-breaker에 가깝다.
+
+`temporal_tardiness_proxy`
+
+초기 placement에서는 아직 실제 좌표가 정해지기 전이라 정확한 crane-feasible slot을 알 수 없다. 대신 중대형 instance에서 bay별 현재 schedule만 보고 schedule-only entry proxy를 계산해, 시간적으로 이미 막혀 있어 due date를 넘길 가능성이 큰 bay를 약하게 뒤로 미룬다. 이 항은 `_TEMPORAL_RANK_ALPHA`로 축소해서 preference와 load balance를 완전히 압도하지 않게 한다.
 
 ### 중요한 점
 
@@ -493,15 +498,17 @@ solution을 고른다.
 
 ## 9. Fallback 구조
 
-초기 배치가 실패할 수 있으므로 `algorithm`에는 여러 안전장치가 있다.
+초기 배치가 실패하거나 feasible이더라도 tardiness가 남을 수 있으므로 `algorithm`에는 여러 안전장치와 비교 단계가 있다.
 
 1. 기본 `target_entry`로 `place_initial`
-2. 실패하면 `target_entry = release_time`으로 다시 `place_initial`
-3. 그래도 실패하면 모든 block을 `_force_place` 방식으로 배치
-4. 이후 SA 수행
-5. SA가 feasible solution을 못 찾았지만 initial solution이 feasible이면 initial solution 반환
+2. 기본 초기해가 infeasible이거나 `obj1 > 0`이면 `target_entry = release_time`으로 다시 `place_initial`
+3. 두 초기 후보를 `check_feasibility` objective로 비교해 더 낮은 objective를 선택
+4. 그래도 infeasible이면 repair와 all-forced placement로 feasible solution 확보
+5. 이후 SA 수행
+6. SA가 feasible solution을 못 찾았지만 initial solution이 feasible이면 initial solution 반환
 
 즉, 목표는 "무조건 멋진 최적화"가 아니라 "제한 시간 안에 feasible solution을 확보하고, 가능하면 개선"이다.
+`release_time` 후보는 `athena.init.fallback` event로 기록되며, `reason`은 `"infeasible"` 또는 `"tardy_compare"`이고 `selected`는 실제 채택 여부를 나타낸다.
 
 ---
 
@@ -571,11 +578,12 @@ function algorithm(prob_info, timelimit):
         earliest feasible slots
     )
 
-    if assignments infeasible:
-        target_entry = release_time으로 바꾸고 다시 place_initial
+    if assignments infeasible or assignments.obj1 > 0:
+        release_assignments = release_time으로 다시 place_initial
+        둘 중 objective가 더 낮은 초기해 선택
 
     if still infeasible:
-        all-forced placement 수행
+        repair 또는 all-forced placement 수행
 
     best = simulated_annealing(assignments)
 
@@ -651,4 +659,4 @@ feasible solution 확보에는 좋지만, empty-bay window를 찾는 방식이�
 
 ## 16. 발표용 1분 요약
 
-Athena Solver는 `baseline/my_new_algorithm.py` entrypoint와 `baseline/athena/` 내부 모듈로 구성되며, block stowage scheduling 문제를 다섯 단계로 푸는 휴리스틱 알고리즘이다. 먼저 block과 orientation별 bounding box, 면적, bay fit 같은 feature를 미리 계산한다. 그 다음 시간축 workload가 한쪽에 몰리지 않도록 각 block의 target entry time을 정한다. 이후 bay preference, workload balance, bay fit을 기준으로 후보 bay와 orientation을 정렬하고, target entry 순서대로 block을 하나씩 sweep 배치한다. 이때 crane entry/exit, spatial collision, future entry/exit blocking을 검사해서 가능한 가장 이른 slot을 찾는다. 초기해가 실패하면 release_time 기반 fallback과 force placement로 feasible solution을 확보한다. 마지막으로 Simulated Annealing을 돌면서 entry time, orientation, bay, position을 바꾸거나 tardy block을 destroy-repair하여 objective를 개선한다. 모든 후보는 `check_feasibility`로 검증되므로 최종 출력 형식을 안정적으로 만족하도록 설계되어 있다.
+Athena Solver는 `baseline/my_new_algorithm.py` entrypoint와 `baseline/athena/` 내부 모듈로 구성되며, block stowage scheduling 문제를 다섯 단계로 푸는 휴리스틱 알고리즘이다. 먼저 block과 orientation별 bounding box, 면적, bay fit 같은 feature를 미리 계산한다. 그 다음 시간축 workload가 한쪽에 몰리지 않도록 각 block의 target entry time을 정한다. 이후 bay preference, workload balance, bay fit을 기준으로 후보 bay와 orientation을 정렬하고, target entry 순서대로 block을 하나씩 sweep 배치한다. 이때 crane entry/exit, spatial collision, future entry/exit blocking을 검사해서 가능한 가장 이른 slot을 찾는다. 초기해가 실패하거나 tardiness가 남으면 release_time 기반 후보와 objective를 비교해 더 좋은 초기해를 고르고, 필요하면 repair와 force placement로 feasible solution을 확보한다. 마지막으로 Simulated Annealing을 돌면서 entry time, orientation, bay, position을 바꾸거나 tardy block을 destroy-repair하여 objective를 개선한다. 모든 후보는 `check_feasibility`로 검증되므로 최종 출력 형식을 안정적으로 만족하도록 설계되어 있다.

@@ -82,14 +82,51 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
           n_forced=n_forced,
           n_unplaced=n_unplaced)
 
+    fallback_deadline = min(hard_deadline - safety,
+                            t_start + max(4.0, timelimit * 0.55))
+    init_tardiness = float(init_res.get("obj1") or 0.0) if init_res["feasible"] else 0.0
+    fallback_reason = None
+    if not init_res["feasible"]:
+        fallback_reason = "infeasible"
+    elif init_tardiness > 0.0:
+        fallback_reason = "tardy_compare"
+
+    fallback_attempted = False
+    if fallback_reason is not None and time.time() < fallback_deadline:
+        target_entry_fb = [int(blocks[i]["release_time"]) for i in range(n)]
+        assignments_fb, n_forced_fb, n_unplaced_fb = place_initial(
+            prob_info, F, bays,
+            target_entry_fb, target_orient,
+            w1, w2, w3,
+            fallback_deadline,
+        )
+        fb_res, fb_sol = evaluate_solution(prob_info, assignments_fb)
+        fb_obj = float(fb_res["objective"]) if fb_res["feasible"] else float("inf")
+        selected = fb_obj < init_obj
+        fallback_attempted = True
+        _emit("athena.init.fallback",
+              elapsed=round(time.time() - t_start, 3),
+              feasible=bool(fb_res["feasible"]),
+              stage=str(fb_res.get("stage")),
+              objective=fb_obj,
+              n_forced=n_forced_fb,
+              n_unplaced=n_unplaced_fb,
+              reason=fallback_reason,
+              selected=selected)
+        if selected:
+            assignments = assignments_fb
+            init_obj = fb_obj
+            init_sol = fb_sol
+            init_res = fb_res
+
     if not init_res["feasible"] and time.time() < hard_deadline - safety:
         repair_deadline = min(hard_deadline - safety,
-                              t_start + max(3.0, timelimit * 0.42))
+                              t_start + max(5.0, timelimit * 0.65))
         rep_assign, rep_res, rep_sol, rep_count = repair_conflict_closure(
             prob_info, F, bays, assignments, w1, w2, w3, repair_deadline,
         )
         rep_obj = float(rep_res["objective"]) if rep_res["feasible"] else float("inf")
-        _emit("athena.init.repair",
+        _emit("athena.fallback.repair" if fallback_attempted else "athena.init.repair",
               elapsed=round(time.time() - t_start, 3),
               feasible=bool(rep_res["feasible"]),
               stage=str(rep_res.get("stage")),
@@ -100,50 +137,6 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
             init_obj = rep_obj
             init_sol = rep_sol
             init_res = rep_res
-
-    # If the initial pipeline failed (smoothing pushed everyone into the same
-    # window, etc.), retry with target_entry == release_time as a safety net.
-    if not init_res["feasible"]:
-        target_entry_fb = [int(blocks[i]["release_time"]) for i in range(n)]
-        assignments_fb, n_forced_fb, n_unplaced_fb = place_initial(
-            prob_info, F, bays,
-            target_entry_fb, target_orient,
-            w1, w2, w3,
-            min(hard_deadline - safety, t_start + max(4.0, timelimit * 0.55)),
-        )
-        fb_res, fb_sol = evaluate_solution(prob_info, assignments_fb)
-        fb_obj = float(fb_res["objective"]) if fb_res["feasible"] else float("inf")
-        _emit("athena.init.fallback",
-              elapsed=round(time.time() - t_start, 3),
-              feasible=bool(fb_res["feasible"]),
-              stage=str(fb_res.get("stage")),
-              objective=fb_obj,
-              n_forced=n_forced_fb,
-              n_unplaced=n_unplaced_fb)
-        if fb_obj < init_obj:
-            assignments = assignments_fb
-            init_obj = fb_obj
-            init_sol = fb_sol
-            init_res = fb_res
-
-        if not init_res["feasible"] and time.time() < hard_deadline - safety:
-            repair_deadline = min(hard_deadline - safety,
-                                  t_start + max(5.0, timelimit * 0.65))
-            rep_assign, rep_res, rep_sol, rep_count = repair_conflict_closure(
-                prob_info, F, bays, assignments, w1, w2, w3, repair_deadline,
-            )
-            rep_obj = float(rep_res["objective"]) if rep_res["feasible"] else float("inf")
-            _emit("athena.fallback.repair",
-                  elapsed=round(time.time() - t_start, 3),
-                  feasible=bool(rep_res["feasible"]),
-                  stage=str(rep_res.get("stage")),
-                  objective=rep_obj,
-                  repaired=rep_count)
-            if rep_res["feasible"]:
-                assignments = rep_assign
-                init_obj = rep_obj
-                init_sol = rep_sol
-                init_res = rep_res
 
     # Hard safety net: if both placement/repair passes failed, build a
     # boundary-safe serial solution. This may be tardy, but it never creates
