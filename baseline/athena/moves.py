@@ -11,10 +11,11 @@ from .features import Features
 from .placement import (
     _candidate_positions,
     _find_earliest_slot,
-    _force_place,
     _placement_score,
+    _safe_fallback_place,
     rank_bays_for_block,
 )
+from .state import _bay_weights
 from .state import FastState
 
 # --------- State-mutating move variants ----------------------------------
@@ -123,7 +124,9 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
         due = int(blk["due_date"])
         prefs = blk["bay_preferences"]
         s_max = max(prefs)
-        ranked = rank_bays_for_block(prob_info, F, bays, bi, bay_loads, w1, w2, w3)
+        bay_weights = _bay_weights(bays)
+        ranked = rank_bays_for_block(prob_info, F, bays, bi, bay_loads, w1, w2, w3,
+                                      bay_weights, bay_schedule, r, p, due)
         best_score = float("inf")
         best = None
         for _, bid, oi in ranked[:3]:
@@ -145,7 +148,19 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
                     best_score = score
                     best = (bid, cx, cy, oi, e, e_t)
         if best is None:
-            best = _force_place(bi, prob_info, F, bays, bay_schedule)
+            best = _safe_fallback_place(
+                bi, prob_info, F, bays,
+                bay_placed, bay_schedule, bay_loads,
+                w1, w2, w3, bay_weights,
+                deadline=deadline, earliest_entry=r,
+            )
+        if best is None:
+            # Keep the original assignment rather than inventing an invalid
+            # repair. The full checker will decide whether the large move is
+            # worth accepting.
+            old = assignments[bi]
+            best = (old["bay_id"], old["x"], old["y"], old["orient_idx"],
+                    old["entry_time"], old["exit_time"])
         bid, cx, cy, oi, e, e_t = best
         bay_placed[bid].append(Block(block_id=bi, block_data=blk, x=cx, y=cy, orient_idx=oi))
         bay_schedule[bid].append((e, e_t))

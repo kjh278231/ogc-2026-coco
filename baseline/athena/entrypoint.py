@@ -12,7 +12,8 @@ from utils import Bay, Block
 from .events import _close_event_log, _emit, _init_event_log
 from .features import precompute_features, smooth_time_windows
 from .parallel import parallel_sa_multi_start
-from .placement import _force_place, place_initial
+from .placement import place_initial
+from .repair import build_safe_serial_assignments, repair_conflict_closure
 from .sa import _DEFAULT_PROFILE, sa_loop
 from .solution import evaluate_solution
 
@@ -63,7 +64,7 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
 
     # Phase 4 (uses phase 3 ranker internally)
     init_deadline = min(hard_deadline - safety, t_start + max(2.0, timelimit * 0.30))
-    assignments, n_forced = place_initial(
+    assignments, n_forced, n_unplaced = place_initial(
         prob_info, F, bays,
         target_entry, target_orient,
         w1, w2, w3,
@@ -76,13 +77,33 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
           feasible=bool(init_res["feasible"]),
           stage=str(init_res.get("stage")),
           objective=init_obj,
-          n_forced=n_forced)
+          n_forced=n_forced,
+          n_unplaced=n_unplaced)
+
+    if not init_res["feasible"] and time.time() < hard_deadline - safety:
+        repair_deadline = min(hard_deadline - safety,
+                              t_start + max(3.0, timelimit * 0.42))
+        rep_assign, rep_res, rep_sol, rep_count = repair_conflict_closure(
+            prob_info, F, bays, assignments, w1, w2, w3, repair_deadline,
+        )
+        rep_obj = float(rep_res["objective"]) if rep_res["feasible"] else float("inf")
+        _emit("athena.init.repair",
+              elapsed=round(time.time() - t_start, 3),
+              feasible=bool(rep_res["feasible"]),
+              stage=str(rep_res.get("stage")),
+              objective=rep_obj,
+              repaired=rep_count)
+        if rep_res["feasible"]:
+            assignments = rep_assign
+            init_obj = rep_obj
+            init_sol = rep_sol
+            init_res = rep_res
 
     # If the initial pipeline failed (smoothing pushed everyone into the same
     # window, etc.), retry with target_entry == release_time as a safety net.
     if not init_res["feasible"]:
         target_entry_fb = [int(blocks[i]["release_time"]) for i in range(n)]
-        assignments_fb, n_forced_fb = place_initial(
+        assignments_fb, n_forced_fb, n_unplaced_fb = place_initial(
             prob_info, F, bays,
             target_entry_fb, target_orient,
             w1, w2, w3,
@@ -95,37 +116,57 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
               feasible=bool(fb_res["feasible"]),
               stage=str(fb_res.get("stage")),
               objective=fb_obj,
-              n_forced=n_forced_fb)
+              n_forced=n_forced_fb,
+              n_unplaced=n_unplaced_fb)
         if fb_obj < init_obj:
             assignments = assignments_fb
             init_obj = fb_obj
             init_sol = fb_sol
             init_res = fb_res
 
-    # Hard safety net: if both place_initial passes failed, do an all-forced
-    # pass that places every block into an empty-bay window via _force_place.
-    # By construction this is feasible (each block alone in the bay during
-    # its time interval).
+        if not init_res["feasible"] and time.time() < hard_deadline - safety:
+            repair_deadline = min(hard_deadline - safety,
+                                  t_start + max(5.0, timelimit * 0.65))
+            rep_assign, rep_res, rep_sol, rep_count = repair_conflict_closure(
+                prob_info, F, bays, assignments, w1, w2, w3, repair_deadline,
+            )
+            rep_obj = float(rep_res["objective"]) if rep_res["feasible"] else float("inf")
+            _emit("athena.fallback.repair",
+                  elapsed=round(time.time() - t_start, 3),
+                  feasible=bool(rep_res["feasible"]),
+                  stage=str(rep_res.get("stage")),
+                  objective=rep_obj,
+                  repaired=rep_count)
+            if rep_res["feasible"]:
+                assignments = rep_assign
+                init_obj = rep_obj
+                init_sol = rep_sol
+                init_res = rep_res
+
+    # Hard safety net: if both placement/repair passes failed, build a
+    # boundary-safe serial solution. This may be tardy, but it never creates
+    # an invalid coordinate and keeps SA in the feasible region.
     if not init_res["feasible"]:
-        all_forced = {}
-        f_bay_schedule = [[] for _ in bays]
-        edd_order = sorted(range(n), key=lambda i: blocks[i]["due_date"])
-        for bi in edd_order:
-            bid, fx, fy, foi, fe, fe_t = _force_place(bi, prob_info, F, bays, f_bay_schedule)
-            f_bay_schedule[bid].append((fe, fe_t))
-            all_forced[bi] = {
-                "block_id": bi, "bay_id": bid,
-                "x": int(fx), "y": int(fy), "orient_idx": foi,
-                "entry_time": int(fe), "exit_time": int(fe_t),
-            }
+        edd_order = sorted(
+            range(n),
+            key=lambda i: (
+                blocks[i]["due_date"] - blocks[i]["release_time"] - blocks[i]["processing_time"],
+                blocks[i]["due_date"],
+                -max(F.area_sum.get((i, oi), 0.0) for oi in range(len(blocks[i]["shape"]))),
+            ),
+        )
+        all_forced, missing_forced = build_safe_serial_assignments(
+            prob_info, F, bays, edd_order,
+        )
         af_res, af_sol = evaluate_solution(prob_info, all_forced)
         af_obj = float(af_res["objective"]) if af_res["feasible"] else float("inf")
         _emit("athena.init.all_forced",
               elapsed=round(time.time() - t_start, 3),
               feasible=bool(af_res["feasible"]),
               stage=str(af_res.get("stage")),
-              objective=af_obj)
-        if af_obj < init_obj:
+              objective=af_obj,
+              missing=missing_forced)
+        if af_res["feasible"] or af_obj < init_obj:
             assignments = all_forced
             init_obj = af_obj
             init_sol = af_sol
@@ -175,7 +216,7 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
 
     # Only fan out to processes when there is more than one core AND enough
     # remaining budget to amortise spawn overhead; otherwise run single-start.
-    use_parallel = max_workers >= 2 and remaining > 2.0
+    use_parallel = init_res["feasible"] and max_workers >= 2 and remaining > 2.0
 
     if use_parallel:
         ev_base = os.environ.get("OGC2026_EVENT_LOG")
@@ -205,7 +246,7 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
                 best_sol = sol
                 best_obj = float(res["objective"])
 
-    if best_assign is None and time.time() < sa_deadline:
+    if init_res["feasible"] and best_assign is None and time.time() < sa_deadline:
         # Fallback: single-start SA in the main process. Taken when only one
         # core is available, too little budget remained, or the parallel run
         # produced no usable feasible solution.
