@@ -81,13 +81,8 @@ def _apply_medium_move_state(state: FastState, prob_info: dict, F: Features,
 
 def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
                        bays: list[Bay], deadline: float,
-                       w1: float, w2: float, w3: float,
-                       lite: bool = False) -> None:
-    """Destroy tardy / overloaded blocks and sweep-repair them.
-
-    The lite variant keeps the same full-check accept path, but repairs a much
-    smaller tardy neighborhood so dense instances can try more macro moves.
-    """
+                       w1: float, w2: float, w3: float) -> None:
+    """Destroy tardy / overloaded blocks and sweep-repair them."""
     blocks = prob_info["blocks"]
     n = len(blocks)
     tardy = []
@@ -96,17 +91,12 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
         if lateness > 0:
             tardy.append((lateness, bi))
     if not tardy:
-        k = max(1, n // (45 if lite else 15))
+        k = max(1, n // 15)
         seed_blocks = random.sample(list(assignments.keys()), min(k, n))
     else:
         tardy.sort(reverse=True)
-        if lite:
-            destroy_size = max(1, min(len(tardy), max(2, n // 60)))
-            pool_span = max(destroy_size * 2, destroy_size)
-        else:
-            destroy_size = max(1, min(len(tardy), n // 10))
-            pool_span = max(destroy_size * 3, destroy_size)
-        pool = [bi for _, bi in tardy[:pool_span]]
+        destroy_size = max(1, min(len(tardy), n // 10))
+        pool = [bi for _, bi in tardy[:max(destroy_size * 3, destroy_size)]]
         keep_worst = max(1, destroy_size // 2)
         seed_blocks = [bi for _, bi in tardy[:keep_worst]]
         remaining = [bi for bi in pool if bi not in seed_blocks]
@@ -119,17 +109,10 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
     # the tardy blocks rarely opens an earlier slot when the bay timeline is
     # already dense.
     destroyed = set(seed_blocks)
-    if lite:
-        destroy_limit = max(
-            len(destroyed),
-            min(max(4, n // 40),
-                len(seed_blocks) + max(1, len(seed_blocks) // 2)),
-        )
-    else:
-        destroy_limit = max(
-            len(destroyed),
-            min(n // 6, len(seed_blocks) + max(2, len(seed_blocks) // 2)),
-        )
+    destroy_limit = max(
+        len(destroyed),
+        min(n // 6, len(seed_blocks) + max(2, len(seed_blocks) // 2)),
+    )
     for bi in list(seed_blocks):
         if len(destroyed) >= destroy_limit:
             break
@@ -189,12 +172,11 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
                                       bay_weights, bay_schedule, r, p, due)
         best_score = float("inf")
         best = None
-        bay_cap = max(2, min(3, len(bays))) if lite else max(3, min(5, len(bays)))
-        pos_cap = 6 if lite else 10
+        bay_cap = max(3, min(5, len(bays)))
         for _, bid, oi in ranked[:bay_cap]:
             bay = bays[bid]
             blk_bb = F.aabb[(bi, oi)]
-            cands = _candidate_positions(bay, blk_bb, bay_placed[bid])[:pos_cap]
+            cands = _candidate_positions(bay, blk_bb, bay_placed[bid])[:10]
             for cx, cy in cands:
                 new_blk = Block(block_id=bi, block_data=blk, x=cx, y=cy, orient_idx=oi)
                 if not bay.contains_block(new_blk):
@@ -216,7 +198,6 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
                 bay_placed, bay_schedule, bay_loads,
                 w1, w2, w3, bay_weights,
                 deadline=deadline, earliest_entry=r,
-                pos_cands_cap=24 if lite else 64,
             )
         if best is None:
             # Keep the original assignment rather than inventing an invalid
