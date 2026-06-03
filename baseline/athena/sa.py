@@ -127,12 +127,13 @@ SA_PROFILES: list[dict] = [
         "cooling": 0.998,
         "t0_scale": 1.0,
     },
-    {   # profile 3: local-position focused (small 70% / medium 20% / large 10%)
-        "name": "local_position",
-        "move_probs": (0.70, 0.90),
-        "bay_change_prob": 0.25,
+    {   # profile 3: cheap tardy-neighborhood repair
+        "name": "tardy_lite_repair",
+        "move_probs": (0.55, 0.75),
+        "bay_change_prob": 0.35,
         "cooling": 0.999,
-        "t0_scale": 0.7,
+        "t0_scale": 0.8,
+        "large_mode": "lite",
     },
 ]
 
@@ -165,14 +166,14 @@ def _adaptive_move_probs(profile: dict, n_blocks: int) -> tuple[float, float]:
             "balanced": (0.42, 0.68),       # large 32%
             "large_repair": (0.28, 0.50),   # large 50%
             "bay_reassign": (0.30, 0.68),   # large 32%
-            "local_position": (0.55, 0.78), # large 22%
+            "tardy_lite_repair": (0.45, 0.55), # lite large 45%
         }
     else:
         overrides = {
             "balanced": (0.45, 0.72),       # large 28%
             "large_repair": (0.32, 0.55),   # large 45%
             "bay_reassign": (0.32, 0.72),   # large 28%
-            "local_position": (0.58, 0.82), # large 18%
+            "tardy_lite_repair": (0.50, 0.65), # lite large 35%
         }
     return overrides.get(name, base)
 
@@ -198,6 +199,7 @@ def sa_loop(prob_info: dict, F: Features, bays: list[Bay],
     bay_change_prob = prof["bay_change_prob"]
     profile_cooling = prof["cooling"]
     t0_scale = prof["t0_scale"]
+    large_mode = "lite" if prof.get("large_mode") == "lite" else "heavy"
 
     state = build_state(assignments, prob_info, bays, w1, w2, w3)
     cache_pair: dict = {}
@@ -238,7 +240,8 @@ def sa_loop(prob_info: dict, F: Features, bays: list[Bay],
           T0=T0, T_min=T_min, cooling=cooling,
           base_full_period=base_full_period,
           n_blocks=n_blocks, profile=prof["name"],
-          move_probs=[p_small_cut, p_medium_cut, large_prob])
+          move_probs=[p_small_cut, p_medium_cut, large_prob],
+          large_mode=large_mode)
 
     iters = 0
     improvements = 0
@@ -262,15 +265,15 @@ def sa_loop(prob_info: dict, F: Features, bays: list[Bay],
         elif r < p_medium_cut:
             move_type = "medium"
         else:
-            move_type = "large"
+            move_type = "large_lite" if large_mode == "lite" else "large"
 
         # ============================================================
-        # LARGE MOVE: full destroy-repair + full checker (unchanged)
+        # LARGE MOVE: destroy-repair + full checker
         # ============================================================
-        if move_type == "large":
+        if move_type in ("large", "large_lite"):
             dict_assign = state_to_assignments_dict(state)
             _apply_large_move(dict_assign, prob_info, F, bays, deadline,
-                              w1, w2, w3)
+                              w1, w2, w3, lite=(move_type == "large_lite"))
             res, sol = evaluate_solution(prob_info, dict_assign)
             obj = float(res["objective"]) if res["feasible"] else float("inf")
 

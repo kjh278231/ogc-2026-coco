@@ -408,6 +408,12 @@ block만 빼서 다시 넣으면 이미 같은 bay 앞쪽에 고정된 block 때
 열리지 않는 경우가 많다. 그래서 큰 instance에서는 temporal neighborhood를 함께
 destroy해서 bay 내부 순서가 실제로 바뀔 여지를 만든다.
 
+`tardy_lite_repair` profile은 같은 large move 경로를 쓰되 `lite=True`로 더 작은
+tardy neighborhood만 destroy한다. 기존 heavy large move보다 한 번의 repair 폭을
+줄여서 n=250~300 같은 dense instance에서 더 많은 macro move를 시도하게 하는
+역할이다. accept 전에는 똑같이 full `check_feasibility`를 통과해야 하므로
+feasibility authority는 변하지 않는다.
+
 ### Accept rule
 
 현재 objective가 `curr_obj`, 새 objective가 `obj`라고 하자.
@@ -449,12 +455,12 @@ P(accept) = exp(-(obj - curr_obj) / T)
 
 각 worker는 같은 초기해에서 출발하지만 다음을 다르게 가진다 (`SA_PROFILES`).
 
-| profile | small / medium / large | bay-change 비중 | cooling | T0 scale |
-| --- | --- | --- | --- | --- |
-| balanced | 55 / 33 / 12 | 0.50 | 0.998 | 1.0 |
-| large_repair | 40 / 25 / 35 | 0.50 | 0.997 | 1.3 |
-| bay_reassign | 35 / 50 / 15 | 0.75 | 0.998 | 1.0 |
-| local_position | 70 / 20 / 10 | 0.25 | 0.999 | 0.7 |
+| profile | small / medium / large | bay-change 비중 | cooling | T0 scale | large mode |
+| --- | --- | --- | --- | --- | --- |
+| balanced | 55 / 33 / 12 | 0.50 | 0.998 | 1.0 | heavy |
+| large_repair | 40 / 25 / 35 | 0.50 | 0.997 | 1.3 | heavy |
+| bay_reassign | 35 / 50 / 15 | 0.75 | 0.998 | 1.0 | heavy |
+| tardy_lite_repair | 55 / 20 / 25 | 0.35 | 0.999 | 0.8 | lite |
 
 위 표는 작은 instance에서의 기본 비율이다. `n_blocks >= 120`인 큰 instance에서는
 `sa_loop`가 `_adaptive_move_probs`로 effective move 비율을 조정한다. 목적은
@@ -463,10 +469,10 @@ large move가 더 자주 건드리게 하는 것이다.
 
 큰 instance에서의 effective large 비중:
 
-| 조건 | balanced | large_repair | bay_reassign | local_position |
+| 조건 | balanced | large_repair | bay_reassign | tardy_lite_repair |
 | --- | ---: | ---: | ---: | ---: |
-| `120 <= n_blocks < 180` | 28% | 45% | 28% | 18% |
-| `n_blocks >= 180` | 32% | 50% | 32% | 22% |
+| `120 <= n_blocks < 180` | 28% | 45% | 28% | 35% lite |
+| `n_blocks >= 180` | 32% | 50% | 32% | 45% lite |
 
 profile 0(balanced)은 작은 instance에서는 기존 단일 SA와 동일한 move 비율이므로,
 worker 1개로 작은 benchmark를 돌리면 예전과 같은 동작이 된다. 각 worker는 random
