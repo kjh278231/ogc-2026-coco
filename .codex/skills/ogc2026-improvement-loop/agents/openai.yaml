@@ -1,0 +1,4 @@
+interface:
+  display_name: "OGC2026 Improvement Loop"
+  short_description: "Guide OGC2026 solver eval loops"
+  default_prompt: "Use $ogc2026-improvement-loop to summarize an eval run, propose a solver hypothesis, implement a selected hypothesis, or run an approval gate."

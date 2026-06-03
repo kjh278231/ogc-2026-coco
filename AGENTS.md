@@ -180,22 +180,26 @@ contestant가 수정하면 안 된다고 명시함.
 `training_set` 파일 이름은 `prob_<n>.json` 형식이다. 예전 synthetic suite의
 `B<n>`/`b<n>`, `smoke_*`, `bench_*` 명명은 legacy generator 산출물에만 적용된다.
 
-## Claude-origin rules / memory
+## Codex improvement-loop skill / Claude-origin memory
 
 이 repo에는 Claude Code용 운영 지침과 cross-session memory가 `.claude/` 아래에
-이미 구성돼 있다. Codex는 Claude sub-agent를 자동 실행하지 않지만, 같은 작업을
-할 때 아래 파일을 **Codex에서도 적용되는 canonical reference**로 취급한다.
+이미 구성돼 있고, 그 4개 agent prompt는 Codex용 skill로
+`.codex/skills/ogc2026-improvement-loop/`에 이식돼 있다. Codex 세션에서
+eval/improvement/implementation/gate loop를 수행할 때는 **먼저**
+`.codex/skills/ogc2026-improvement-loop/SKILL.md`를 읽고, 요청 유형별 세부 절차는
+아래 reference를 따른다.
 
-- `.claude/agents/README.md` — eval/improvement/implementation/gate loop의 전체
-  흐름.
-- `.claude/agents/eval-analyst.md` — eval 결과를 기계적으로 요약할 때의 규칙.
-- `.claude/agents/improvement-strategist.md` — 가설을 제안할 때의 입력, 출력,
-  anti-pattern memory 규칙.
-- `.claude/agents/solver-developer.md` — 선택된 가설 하나를 구현할 때의 hard
-  rules. 특히 `utils.py` 불변, `algorithm()` signature 유지, monkey-patch 복구,
-  `ALGORITHM.md` sync를 그대로 따른다.
-- `.claude/agents/approval-gate.md` — before/after run 비교와 APPROVE/REJECT/REVIEW
-  판정 규칙.
+- `.codex/skills/ogc2026-improvement-loop/references/eval-analyst.md` — eval 결과를
+  기계적으로 요약할 때의 규칙.
+- `.codex/skills/ogc2026-improvement-loop/references/improvement-strategist.md` —
+  가설을 제안할 때의 입력, 출력, anti-pattern memory 규칙.
+- `.codex/skills/ogc2026-improvement-loop/references/solver-developer.md` — 선택된
+  가설 하나를 구현할 때의 hard rules. 특히 `utils.py` 불변, `algorithm()`
+  signature 유지, monkey-patch 복구, reference doc sync를 그대로 따른다.
+- `.codex/skills/ogc2026-improvement-loop/references/approval-gate.md` —
+  before/after run 비교와 APPROVE/REJECT/REVIEW 판정 규칙.
+- `.claude/agents/*.md` — Claude Code용 원본 prompt. Codex skill과 충돌하거나
+  최신 이식 여부가 의심될 때만 upstream reference로 확인한다.
 - `.claude/skills/geometry-debug/SKILL.md` — Stage 2/3/4 feasibility 실패 원인
   분해가 필요할 때의 절차와 응답 형식.
 - `.claude/scratch/*.jsonl` — 가설 이력, 구현 이력, gate 판정의 append-only
@@ -203,8 +207,8 @@ contestant가 수정하면 안 된다고 명시함.
   사용한다. 새 기록을 남길 때도 기존 schema를 유지한다.
 
 Claude agent prompt에 `CLAUDE.md`를 읽으라고 적힌 곳은 Codex 세션에서는 이
-`AGENTS.md`를 우선 읽고, Claude-only 차이가 필요한 경우에만 `CLAUDE.md`를 함께
-확인한다.
+`AGENTS.md`와 Codex skill reference를 우선 읽고, Claude-only 차이가 필요한 경우에만
+`CLAUDE.md`를 함께 확인한다.
 
 ## 답변 / 응답 언어 규칙
 
