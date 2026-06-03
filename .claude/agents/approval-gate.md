@@ -13,7 +13,8 @@ APPROVE, REJECT, 또는 REVIEW 중 하나이며 규칙별 평가를 명시한다
 
 - `target_run`: 변경 후 생성된 run_id.
 - `baseline_run`: 변경 전 run_id. 사용자가 명시하지 않으면 `target_run` 직전의
-  **같은 algo** run을 사용.
+  **같은 algo + 같은 러너 config + 같은 instance set** run을 사용. `prob_*` full
+  regression은 targeted probe run과 비교하지 않는다.
 - 선택: solver-developer의 hypothesis JSON (`algo`, `expected_impact` 교차 검증용).
 
 `baseline_run`이 없으면(최초 run), reason "no prior baseline"으로 `REVIEW`를 emit하고
@@ -34,6 +35,11 @@ APPROVE, REJECT, 또는 REVIEW 중 하나이며 규칙별 평가를 명시한다
    (runs.note의 `[parallel ...]` 마커)가 다르면, obj 비교가 오염되므로 reason
    "non-comparable runner config"로 `REVIEW`. athena가 serial로 돈 run이면 추가로
    "벤치마크 규약은 parallel_eval" 경고를 detail에 남길 것.
+4. **instance set 정합성.** baseline과 target의 matched instance set이 같아야 한다.
+   target이 `prob_1`..`prob_20` full regression이면 baseline도 같은 20개 `prob_*`
+   instance를 포함해야 한다. `prob_9.json` 같은 targeted probe를 full regression
+   baseline으로 쓰면 reason "targeted probe mixed with full regression"으로
+   `REVIEW`.
 
 아래 R1–R6의 모든 쿼리는 **R0에서 정한 db_label로 필터**한다 (`algo = '<db_label>'`).
 
@@ -51,7 +57,24 @@ APPROVE, REJECT, 또는 REVIEW 중 하나이며 규칙별 평가를 명시한다
   `(target.total_obj - baseline.total_obj) / baseline.total_obj > 0.05` → 위반.
 **위반 하나라도 → REJECT.**
 
-### R3 (soft) — bench instance는 net 개선 또는 유지
+### R3a (hard/soft) — canonical `prob_*` full-suite 회귀 gate
+
+baseline과 target이 `prob_*` full regression이면 아래를 적용한다.
+
+- **Hard fail:** feasible-both인 어떤 `prob_*` instance라도 objective가 **5% 초과**
+  회귀하면 `REJECT`.
+- **Soft fail:** feasible-both인 `prob_*` instance 중 회귀 instance 수가 개선 instance
+  수보다 많으면 soft fail.
+- **Soft fail:** full-suite aggregate
+  `sum(target.total_obj) / sum(baseline.total_obj) > 1.001`이면 soft fail
+  (전체 0.1% 초과 회귀).
+- **Pass:** aggregate가 개선되거나 동일하고, 5% 초과 단일 회귀가 없으며, 회귀 instance
+  수가 개선 instance 수보다 많지 않으면 통과.
+
+이 규칙은 현재 canonical benchmark인 `training_set/prob_1.json`..`prob_20.json`을
+대상으로 한다. targeted probe에는 적용하지 않는다.
+
+### R3b (soft) — bench instance는 net 개선 또는 유지
 
 `bench_` 또는 `my_`로 시작하는 instance에 대해 계산:
   `mean(target.total_obj / baseline.total_obj across feasible-both)`
@@ -156,7 +179,8 @@ reason "non-comparable instance sets"로 REVIEW emit — 통계 비교 시도 �
 | R0 algo/runner | PASS / REVIEW | <db_label; 두 run 같은 algo·러너인지> |
 | R1 feasibility | PASS / FAIL | <어떤 instance(들)> |
 | R2 smoke regression | PASS / FAIL | <max %, 어떤 instance> |
-| R3 bench mean | PASS / SOFT FAIL | mean ratio = X.XXX |
+| R3a prob full-suite | PASS / FAIL / SOFT FAIL / N/A | aggregate ratio, 개선/회귀 count, max regression |
+| R3b bench mean | PASS / SOFT FAIL / N/A | mean ratio = X.XXX |
 | R4 SA throughput | PASS / SOFT FAIL / N/A | <hermes: instance별 / athena: N/A 또는 worker 로그 근거> |
 | R5 worst-init(fallback) rate | PASS / FAIL / N/A | <hermes: fallback_triggered N→M / athena: all_forced N→M> |
 | R6 expected impact | PASS / SOFT FAIL / N/A | <선언 vs 실제 비교> |

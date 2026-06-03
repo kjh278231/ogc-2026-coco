@@ -25,6 +25,12 @@ improvement-strategist 몫이다. 코드는 수정하지 않는다.
    "serial로 실행됨 — 벤치마크 규약은 parallel"이라고 **명시적으로 flag**한다.
    A/B 비교 대상 두 run의 러너·`--workers`·`--cores-per-worker`가 다르면
    "non-comparable runner config"로 표시하고 obj 비교를 보류한다.
+3. **instance set / scope.** `training_set/prob_*.json` full regression과 targeted
+   probe run은 서로 다른 실험이다. target run이 `prob_1`..`prob_20` 전체를 포함하면
+   baseline도 **같은 algo, 같은 러너 config, 같은 20개 instance set**을 가진 최근 full
+   run으로 고른다. 직전 run이 `prob_9.json` 같은 targeted probe면 baseline pool에서
+   제외한다. 반대로 target이 targeted probe면 같은 targeted pattern 또는 명시된
+   baseline과만 비교하고, full-suite aggregate와 섞지 않는다.
 
 ## 데이터 소스
 
@@ -104,10 +110,14 @@ event 이름**(`init.chosen`, `init.fallback`, `sa.complete`)을 main 로그에�
 1. **Target run + algo + runner 식별.** 사용자가 명시했으면 그것; 아니면
    `SELECT run_id FROM runs ORDER BY run_id DESC LIMIT 1`. 그 run의 `algo`(DB label)와
    러너(note의 parallel 마커)를 0번 섹션대로 확정.
-2. **Baseline pool 선택** — 별다른 지시가 없으면 **같은 algo**의 직전 3 run.
-   다른 algo run은 pool에서 제외.
+2. **Baseline pool 선택** — 별다른 지시가 없으면 **같은 algo + 같은 러너 config +
+   같은 instance set**의 최근 run을 우선한다. `prob_*` full regression은 최근 full
+   regression끼리 비교하고, targeted probe run은 full baseline window에서 제외한다.
+   다른 algo run은 pool에서 제외한다.
 3. **요약을 끌어옴**: `python tools/eval_summary.py --target-run <id>
-   --baseline-window 3`. 출력된 Markdown을 읽음.
+   --baseline-window 3`. 출력된 Markdown을 읽되, targeted probe가 baseline window에
+   섞였으면 그 표를 그대로 결론으로 쓰지 말고 DB에서 comparable baseline을 다시
+   고른다.
 4. **이상치 digest drill** — regressed / feasibility-lost / (Hermes면 fallback_triggered,
    athena면 `athena.init.all_forced` 발화)로 표시된 instance마다 `events`를
    (run_id, instance)로 쿼리한다. **대상 algo의 event prefix를 사용**: Hermes면

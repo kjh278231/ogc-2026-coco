@@ -19,6 +19,9 @@ sub-agent. 각 agent는 의도적으로 좁은 책임만 가지며, orchestratio
 - **벤치마크 default = Athena를 `parallel_eval.py`로 병렬 실행.** algo 미지정 시 이것.
 - **A/B 비교는 같은 algo·같은 러너·같은 `--workers`/`--cores-per-worker`에서만.**
   parallel athena와 serial hermes의 objective를 직접 비교하지 말 것.
+- **Full regression과 targeted probe를 섞지 말 것.** `training_set/prob_1`..`prob_20`
+  전체 run은 같은 20개 instance set의 full run과만 aggregate 비교한다. `prob_9.json`
+  같은 targeted probe는 원인 확인용이며 full-suite baseline으로 쓰지 않는다.
 - `instance_results`의 `sa_iterations`/`init_heuristic`/`fallback_triggered` 컬럼은
   Hermes event 기준이라 **athena에선 비어 있다** — athena 신호는 `events`의
   `athena.*`(+ per-worker `.worker<k>` 로그)에서 읽는다.
