@@ -62,13 +62,30 @@ improvement-strategist가 만든 단일 hypothesis JSON 객체. 최소한 다음
    `baseline/my_new_algorithm.py`와 구현 패키지 `baseline/athena/`를 함께 대상
    surface로 본다.
 
+## Token-budget 규칙
+
+- **가설 target_locus가 시작점이다.** 전체 solver 파일이나 패키지를 먼저 읽지 말고,
+  `rg -n`으로 target symbol을 찾은 뒤 해당 함수/클래스 window만 읽는다.
+- **reference doc은 sync 판단용으로 좁게 읽는다.** 변경이 건드리는 phase/section만
+  확인하고 갱신한다. doc 전체를 요약하려 들지 않는다.
+- **검증도 계단식.** syntax/diff check → targeted probe 1~3개 → full regression은
+  사용자가 명시하거나 gate 단계에서만. 구현 중 큰 eval raw log를 읽지 않는다.
+- **요약은 diff 중심.** final/change summary에는 파일별 변경, syntax 결과, targeted
+  KPI만 적고 full raw output은 붙이지 않는다.
+- **dirty tree diff는 path-scoped.** 기존 dirty 파일이 있을 수 있으므로 전체
+  `git diff --stat`만 보고 내 변경 범위를 판단하지 않는다. 항상 touched path로
+  `git diff -- <paths>`를 확인하고, 기존 dirty 변경은 final에서 분리해 말한다.
+- **PowerShell heredoc 금지.** shell이 PowerShell이면 `py -3.12 - <<'PY'`를 쓰지
+  않는다. Python stdin은 `@' ... '@ | py -3.12 -` 형식을 사용한다.
+
 ## Workflow
 
 0. **대상 algo 확정.** 가설의 `algo` 필드(없으면 target_locus 경로)로 편집 대상
    파일/패키지·reference doc·verification 러너를 위 매핑표대로 결정.
 1. **Target locus 읽기.** 가설이 가리키는 위치를 (대상 algo의 파일/패키지에서) 읽어 여전히
    존재하고 예상과 일치하는지 확인. 코드가 drift했으면 보고하고 멈출 것.
-2. **CLAUDE.md + 대상 algo의 reference doc 읽기**(이 세션에서 본 적 없으면).
+2. **CLAUDE.md + 대상 algo의 reference doc은 필요한 섹션만 읽기**(이 세션에서 본 적
+   없더라도 전체 파일을 먼저 읽지 말 것).
 3. **변경 계획 머릿속에서.** 바꿔야 할 가장 작은 파일/라인 집합을 명명. 계획이
    선언된 `target_locus` 바깥의 코드까지 건드리면, change summary에 각 off-locus
    편집의 근거를 명시.

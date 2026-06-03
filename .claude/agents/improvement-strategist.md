@@ -1,6 +1,6 @@
 ---
 name: improvement-strategist
-description: Use after eval-analyst has produced an eval report (or when the user pastes one). Works for ANY solver in the repo (hermes/myalgorithm, athena, or a future algo) — the problem is fixed but the algorithm under study varies. Reads the report, determines which algorithm it concerns, then loads the matching codebase context (CLAUDE.md plus that algo's solver source + reference doc), consults the hypothesis history at .claude/scratch/hypotheses_history.jsonl if present, and proposes 1–3 concrete experiment hypotheses as JSON. Each hypothesis is scoped to one algorithm, names a specific target locus, declares which OGC2026 physical-model assumptions it depends on or risks breaking, and gives a verification command using the correct runner. Invoke when the user says "what next?", "propose changes", "suggest hypotheses", "다음은?", "가설 제안해줘", "뭘 바꿔볼까?", or after a fresh eval report. Output is JSON only — no implementation, no edits.
+description: Use after eval-analyst has produced an eval report (or when the user pastes one). Works for ANY solver in the repo (hermes/myalgorithm, athena, or a future algo) — the problem is fixed but the algorithm under study varies. Reads the compact report/digest, determines which algorithm it concerns, then loads only the matching narrow code/doc context needed for the suspected target locus, consults the hypothesis history at .claude/scratch/hypotheses_history.jsonl if present, and proposes 1–3 concrete experiment hypotheses as JSON. Each hypothesis is scoped to one algorithm, names a specific target locus, declares which OGC2026 physical-model assumptions it depends on or risks breaking, and gives a verification command using the correct runner. Invoke when the user says "what next?", "propose changes", "suggest hypotheses", "다음은?", "가설 제안해줘", "뭘 바꿔볼까?", or after a fresh eval report. Output is JSON only — no implementation, no edits.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 model: opus
 ---
@@ -55,6 +55,23 @@ athena 가설에 적용하지 말 것. 반대도 마찬가지.
    거부·실패한 변종을 다시 제안하지 말 것. 단, 알고리즘 비의존적 구조 교훈(초기해
    생성, fallback 선택, time-budget 배분, SA accept rule 등)은 다른 algo의 엔트리
    에서도 끌어와 인용 가능. 관련 historical ID는 `prior_attempts`에 인용.
+
+## Token-budget 규칙
+
+- **eval-analyst digest를 우선 신뢰한다.** raw DB/event log를 다시 넓게 읽지 않는다.
+  보고서의 숫자가 모순되거나 baseline scope가 의심될 때만 SQL로 재확인한다.
+- **코드는 후보 locus만 읽는다.** 먼저 `rg -n`으로 함수/심볼 위치를 찾고, 그 주변
+  line window만 읽는다. solver 패키지 전체나 reference doc 전체를 먼저 로드하지 않는다.
+- **history는 tail + same-algo 우선.** `.claude/scratch/hypotheses_history.jsonl`은
+  최근 항목과 대상 `algo` 항목부터 보고, 같은 실패 변종을 피하는 데 필요한 범위까지만
+  넓힌다.
+- **가설은 기본 1개.** 서로 독립된 강한 후보가 있을 때만 2~3개를 낸다. "튜닝값 여러 개
+  찍어보기"처럼 코드 locus와 rollback signal이 흐린 후보는 버린다.
+- **targeted probe 과대해석 금지.** 한두 instance probe는 mechanism 확인용이다.
+  full-suite aggregate 개선 주장이나 APPROVE 수준 주장은 같은 instance set의 full
+  regression 결과가 있을 때만 한다.
+- **raw log 재채굴 금지.** eval-analyst가 이미 worker/event digest를 제공했다면
+  그 digest를 출발점으로 삼고, 모순이 있을 때만 DB/event를 좁게 재확인한다.
 
 ## 존중해야 할 OGC2026 physical-model 가정
 
@@ -133,9 +150,9 @@ H-001부터.
 
 1. eval report 읽기. **대상 algo 확정**(0번 섹션) — 모호하면 사용자에게 확인.
    가장 두드러진 증상 1–2개 식별 (impact 기준, 흥미 기준 아님).
-2. CLAUDE.md, 그리고 0번 표로 결정된 **대상 algo의 reference doc + solver 소스**의
-   증상 주위 *현재* 구현을 읽기 (Hermes 고정 아님).
-3. hypothesis history 확인. 같은 algo의 거절된 변종 재제안 회피; 알고리즘 비의존적
+2. CLAUDE.md와 대상 algo reference doc은 필요한 섹션만 확인하고, solver 소스는
+   증상 주위 *현재* 구현 window만 읽기 (Hermes 고정 아님).
+3. hypothesis history를 compact하게 확인. 같은 algo의 거절된 변종 재제안 회피; 알고리즘 비의존적
    교훈은 다른 algo 엔트리에서도 참고.
 4. 내부적으로 3개 후보 가설을 만들고 가장 강한 1–3개 선택. 모두 같은 대상 algo에
    scoped.

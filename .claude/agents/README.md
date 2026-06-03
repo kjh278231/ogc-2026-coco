@@ -23,6 +23,42 @@ sub-agent. 각 agent는 의도적으로 좁은 책임만 가지며, orchestratio
   Hermes event 기준이라 **athena에선 비어 있다** — athena 신호는 `events`의
   `athena.*`(+ per-worker `.worker<k>` 로그)에서 읽는다.
 
+## Token-budget discipline (digest-first)
+
+에이전트 loop는 큰 로그·긴 문서를 바로 읽지 않는다. 먼저 작은 digest를 만들고,
+그 digest가 설명하지 못하는 이상치만 drill-down한다.
+
+- **DB/summary 먼저.** `tools/eval_summary.py`와 SQLite aggregate로 run/instance
+  단위 표를 만든 뒤, 필요한 instance만 event/worker 로그를 본다.
+- **JSONL 원문 금지 기본값.** `tools/event_logs/run_<id>/` 전체 `cat`/`rg`를 하지
+  않는다. Athena worker 로그는 `sa.temperature.init`, `sa.improvement`,
+  `sa.complete`, `sa.worker.done`만 파싱해 worker당 한 줄로 요약한다.
+- **문서/코드도 narrow-read.** reference doc 전체를 매번 읽지 말고, target
+  phase/section만 확인한다. 코드는 `rg -n <symbol>` 후 해당 함수 window만 읽는다.
+- **긴 history는 tail 우선.** `.claude/scratch/*.jsonl`은 최근 항목과 같은 algo의
+  rejected/approved 패턴만 읽고, 전체 파일을 근거로 삼아야 할 때만 넓힌다.
+
+## Observed anti-patterns (금지)
+
+최근 개선 루프에서 실제로 토큰·시간을 낭비한 패턴이다. 새 agent/rule을 만들 때도
+아래를 금지 규칙으로 유지한다.
+
+- **광역 event-log grep 금지.** `rg ... tools/event_logs`처럼 모든 run/worker 로그를
+  한 번에 훑지 않는다. 반드시 run id와 instance를 먼저 좁히고, 필요한 event 이름만
+  파싱한다.
+- **PowerShell에서 Bash heredoc 금지.** Windows shell이 PowerShell이면
+  `py -3.12 - <<'PY'`를 쓰지 않는다. 대신 `@' ... '@ | py -3.12 -` 또는
+  `py -3.12 -c "..."`를 사용한다.
+- **콘솔 mojibake로 파일 손상 판단 금지.** 한글 markdown은 PowerShell 출력이 깨져
+  보여도 `Path(...).read_text(encoding='utf-8')`, `s.count('\ufffd')`,
+  필요시 `unicode_escape`로 확인한 뒤 판단한다.
+- **전체 worktree diff를 내 변경으로 보고하지 말 것.** dirty tree에서는 `git diff -- <touched paths>`
+  와 `git diff --stat -- <touched paths>`로 범위를 고정하고, 기존 dirty 파일은 별도
+  메모로 분리한다.
+- **`eval_summary.py` 표를 무비판적으로 결론으로 쓰지 말 것.** baseline window에
+  targeted probe가 섞일 수 있다. full regression은 full regression끼리, targeted
+  probe는 targeted baseline과만 비교한다.
+
 ## The loop
 
 ```
