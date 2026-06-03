@@ -34,10 +34,14 @@ def _apply_small_move_state(state: FastState, prob_info: dict, F: Features) -> s
         if n_or > 1:
             new_oi = random.randrange(n_or)
             a.orient_idx = new_oi
-            bb = F.aabb.get((bi, new_oi))
-            if bb is not None:
-                a.x = max(0, int(math.ceil(-bb[0])))
-                a.y = max(0, int(math.ceil(-bb[1])))
+            anchor = F.safe_anchor.get((bi, new_oi, a.bay_id))
+            if anchor is not None:
+                a.x, a.y = anchor
+            else:
+                bb = F.aabb.get((bi, new_oi))
+                if bb is not None:
+                    a.x = max(0, int(math.ceil(-bb[0])))
+                    a.y = max(0, int(math.ceil(-bb[1])))
     return {bi}
 
 
@@ -58,21 +62,31 @@ def _apply_medium_move_state(state: FastState, prob_info: dict, F: Features,
         state.bay_workload[old_bid] -= blk["workload"]
         state.bay_workload[new_bid] += blk["workload"]
         a.bay_id = new_bid
-        bb = F.aabb.get((bi, a.orient_idx))
-        if bb is not None:
-            a.x = max(0, int(math.ceil(-bb[0])))
-            a.y = max(0, int(math.ceil(-bb[1])))
+        anchor = F.safe_anchor.get((bi, a.orient_idx, new_bid))
+        if anchor is not None:
+            a.x, a.y = anchor
+        else:
+            bb = F.aabb.get((bi, a.orient_idx))
+            if bb is not None:
+                a.x = max(0, int(math.ceil(-bb[0])))
+                a.y = max(0, int(math.ceil(-bb[1])))
     else:
         bay = bays[a.bay_id]
         bb = F.aabb.get((bi, a.orient_idx))
         if bb is None:
             return {bi}
-        max_x = int(bay.width - (bb[2] - bb[0]))
-        max_y = int(bay.height - (bb[3] - bb[1]))
+        bounds = F.anchor_bounds.get((bi, a.orient_idx, a.bay_id))
+        if bounds is not None:
+            min_x, max_x, min_y, max_y = bounds
+        else:
+            min_x = 0
+            min_y = 0
+            max_x = int(bay.width - (bb[2] - bb[0]))
+            max_y = int(bay.height - (bb[3] - bb[1]))
         dx = random.choice([-3, -2, -1, 1, 2, 3])
         dy = random.choice([-2, -1, 1, 2])
-        a.x = max(0, min(max_x, a.x + dx))
-        a.y = max(0, min(max_y, a.y + dy))
+        a.x = max(min_x, min(max_x, a.x + dx))
+        a.y = max(min_y, min(max_y, a.y + dy))
     return {bi}
 
 
@@ -176,13 +190,15 @@ def _apply_large_move(assignments: dict, prob_info: dict, F: Features,
         for _, bid, oi in ranked[:bay_cap]:
             bay = bays[bid]
             blk_bb = F.aabb[(bi, oi)]
-            cands = _candidate_positions(bay, blk_bb, bay_placed[bid])[:10]
+            cands = _candidate_positions(
+                bay, blk_bb, bay_placed[bid],
+                F.anchor_bounds.get((bi, oi, bid)))[:10]
             for cx, cy in cands:
                 new_blk = Block(block_id=bi, block_data=blk, x=cx, y=cy, orient_idx=oi)
                 if not bay.contains_block(new_blk):
                     continue
                 e, e_t = _find_earliest_slot(bay, bay_placed[bid], bay_schedule[bid],
-                                              new_blk, r, p, deadline)
+                                              new_blk, r, p, deadline, F)
                 if e is None:
                     continue
                 tard = max(0, e_t - due)
@@ -246,10 +262,14 @@ def _do_small_move(state: FastState, prob_info: dict, F: Features,
     if n_or > 1:
         new_oi = random.randrange(n_or)
         a.orient_idx = new_oi
-        bb = F.aabb.get((bi, new_oi))
-        if bb is not None:
-            a.x = max(0, int(math.ceil(-bb[0])))
-            a.y = max(0, int(math.ceil(-bb[1])))
+        anchor = F.safe_anchor.get((bi, new_oi, a.bay_id))
+        if anchor is not None:
+            a.x, a.y = anchor
+        else:
+            bb = F.aabb.get((bi, new_oi))
+            if bb is not None:
+                a.x = max(0, int(math.ceil(-bb[0])))
+                a.y = max(0, int(math.ceil(-bb[1])))
         return "small_orient_swap"
     return "small_noop"
 
@@ -277,19 +297,29 @@ def _do_medium_move(state: FastState, prob_info: dict, F: Features,
         state.bay_workload[old_bid] -= blk["workload"]
         state.bay_workload[new_bid] += blk["workload"]
         a.bay_id = new_bid
-        bb = F.aabb.get((bi, a.orient_idx))
-        if bb is not None:
-            a.x = max(0, int(math.ceil(-bb[0])))
-            a.y = max(0, int(math.ceil(-bb[1])))
+        anchor = F.safe_anchor.get((bi, a.orient_idx, new_bid))
+        if anchor is not None:
+            a.x, a.y = anchor
+        else:
+            bb = F.aabb.get((bi, a.orient_idx))
+            if bb is not None:
+                a.x = max(0, int(math.ceil(-bb[0])))
+                a.y = max(0, int(math.ceil(-bb[1])))
         return "medium_bay_change"
     bay = bays[a.bay_id]
     bb = F.aabb.get((bi, a.orient_idx))
     if bb is None:
         return None
-    max_x = int(bay.width - (bb[2] - bb[0]))
-    max_y = int(bay.height - (bb[3] - bb[1]))
+    bounds = F.anchor_bounds.get((bi, a.orient_idx, a.bay_id))
+    if bounds is not None:
+        min_x, max_x, min_y, max_y = bounds
+    else:
+        min_x = 0
+        min_y = 0
+        max_x = int(bay.width - (bb[2] - bb[0]))
+        max_y = int(bay.height - (bb[3] - bb[1]))
     dx = random.choice([-3, -2, -1, 1, 2, 3])
     dy = random.choice([-2, -1, 1, 2])
-    a.x = max(0, min(max_x, a.x + dx))
-    a.y = max(0, min(max_y, a.y + dy))
+    a.x = max(min_x, min(max_x, a.x + dx))
+    a.y = max(min_y, min(max_y, a.y + dy))
     return "medium_pos_perturb"

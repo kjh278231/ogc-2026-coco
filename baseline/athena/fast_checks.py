@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import random
 
-from utils import Bay, Block, check_collisions, check_entry, check_exit
+from utils import Bay
 
 from .features import Features
+from .geometry import crane_obstructs_exact, fits_in_bay, pair_collides_exact
 from .state import Assignment, FastState
 
 # -----------------------------------------------------------------------------
@@ -89,42 +90,24 @@ def _cap_cache(cache: dict, cap: int) -> None:
 
 
 def _pair_collides(a: Assignment, b: Assignment, prob_info: dict,
-                    cache: dict) -> bool:
+                    F: Features, cache: dict) -> bool:
     key = _coll_key(a, b)
     if key in cache:
         return cache[key]
-    blk_a = Block(block_id=a.block_id,
-                  block_data=prob_info["blocks"][a.block_id],
-                  x=a.x, y=a.y, orient_idx=a.orient_idx)
-    blk_b = Block(block_id=b.block_id,
-                  block_data=prob_info["blocks"][b.block_id],
-                  x=b.x, y=b.y, orient_idx=b.orient_idx)
-    # large dummy bay so boundary check passes; pairwise spatial overlap
-    # is bay-independent.
-    dummy = Bay(width=10_000, height=10_000, id=0)
-    result = bool(check_collisions(dummy, [blk_a, blk_b]))
+    result = pair_collides_exact(F, a, b)
     cache[key] = result
     _cap_cache(cache, _PAIR_CACHE_CAP)
     return result
 
 
 def _crane_obstructs(existing: Assignment, new: Assignment, kind: str,
-                      prob_info: dict, bays: list[Bay], cache: dict) -> bool:
+                      prob_info: dict, bays: list[Bay], F: Features,
+                      cache: dict) -> bool:
     """Does `existing` obstruct `new`'s ENTRY (kind='entry') or EXIT ('exit')?"""
     key = _crane_key(existing, new, kind, new.bay_id)
     if key in cache:
         return cache[key]
-    bay = bays[new.bay_id]
-    blk_e = Block(block_id=existing.block_id,
-                  block_data=prob_info["blocks"][existing.block_id],
-                  x=existing.x, y=existing.y, orient_idx=existing.orient_idx)
-    blk_n = Block(block_id=new.block_id,
-                  block_data=prob_info["blocks"][new.block_id],
-                  x=new.x, y=new.y, orient_idx=new.orient_idx)
-    if kind == "entry":
-        result = bool(check_entry(bay, [blk_e], blk_n, fast=True))
-    else:
-        result = bool(check_exit(bay, [blk_e], blk_n, fast=True))
+    result = crane_obstructs_exact(F, existing, new)
     cache[key] = result
     _cap_cache(cache, _CRANE_CACHE_CAP)
     return result
@@ -156,9 +139,7 @@ def fast_check_move(prob_info: dict, F: Features, bays: list[Bay],
         if a.exit_time != a.entry_time + int(blk["processing_time"]):
             return False
         bay = bays[a.bay_id]
-        b_obj = Block(block_id=bi, block_data=blk,
-                      x=a.x, y=a.y, orient_idx=a.orient_idx)
-        if not bay.contains_block(b_obj):
+        if not fits_in_bay(F, bay, a):
             return False
 
     # 2-4. against neighbors (in changed block's CURRENT bay)
@@ -176,27 +157,27 @@ def fast_check_move(prob_info: dict, F: Features, bays: list[Bay],
                 continue
 
             # (2) spatial overlap during their joint interval
-            if _pair_collides(a, k, prob_info, cache_pair):
+            if _pair_collides(a, k, prob_info, F, cache_pair):
                 return False
 
             # (3a) crane entry for the changed block:
             #      is k present at a.entry per the official ordering?
             if _is_present_at_entry_of(k, a.entry_time, a.block_id):
-                if _crane_obstructs(k, a, "entry", prob_info, bays, cache_crane):
+                if _crane_obstructs(k, a, "entry", prob_info, bays, F, cache_crane):
                     return False
             # (3b) crane exit for the changed block:
             #      is k present at a.exit per the official ordering?
             if _is_present_at_exit_of(k, a.exit_time, a.block_id):
-                if _crane_obstructs(k, a, "exit", prob_info, bays, cache_crane):
+                if _crane_obstructs(k, a, "exit", prob_info, bays, F, cache_crane):
                     return False
             # (4a) does the changed block obstruct k's ENTRY?
             #      a is "other" relative to k; check by k's perspective.
             if _is_present_at_entry_of(a, k.entry_time, k.block_id):
-                if _crane_obstructs(a, k, "entry", prob_info, bays, cache_crane):
+                if _crane_obstructs(a, k, "entry", prob_info, bays, F, cache_crane):
                     return False
             # (4b) does the changed block obstruct k's EXIT?
             if _is_present_at_exit_of(a, k.exit_time, k.block_id):
-                if _crane_obstructs(a, k, "exit", prob_info, bays, cache_crane):
+                if _crane_obstructs(a, k, "exit", prob_info, bays, F, cache_crane):
                     return False
 
     # Also: if the changed block's OLD bay differs from the new bay, the

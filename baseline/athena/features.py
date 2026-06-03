@@ -1,6 +1,8 @@
 """Feature precomputation and global time-window smoothing for Athena."""
 from __future__ import annotations
 
+import math
+
 from shapely.geometry import Polygon
 
 from utils import Bay, _bounding_box, _poly_from_verts, _resolve_layers
@@ -12,20 +14,36 @@ from utils import Bay, _bounding_box, _poly_from_verts, _resolve_layers
 class Features:
     __slots__ = (
         "aabb", "obb_local", "local_polys",
+        "layer_aabb", "world_geom_cache",
         "n_layers", "area_top", "area_sum", "crane_risk",
-        "dims", "bay_fit",
+        "dims", "bay_fit", "anchor_bounds", "safe_anchor",
     )
 
     def __init__(self) -> None:
         self.aabb: dict = {}          # (bi, oi) -> (minx, miny, maxx, maxy)
         self.obb_local: dict = {}     # (bi, oi) -> Shapely Polygon (local)
         self.local_polys: dict = {}   # (bi, oi) -> list[Polygon|None]
+        self.layer_aabb: dict = {}    # (bi, oi) -> list[(minx, miny, maxx, maxy)]
+        self.world_geom_cache: dict = {}  # (bi, oi, x, y) -> (layer_aabb, layer_polys)
         self.n_layers: dict = {}      # (bi, oi) -> int
         self.area_top: dict = {}      # (bi, oi) -> float (layer 0 area)
         self.area_sum: dict = {}      # (bi, oi) -> float (sum of per-layer areas)
         self.crane_risk: dict = {}    # (bi, oi) -> float
         self.dims: dict = {}          # (bi, oi) -> (width, height)
         self.bay_fit: dict = {}       # (bi, oi) -> list[bay_id]
+        self.anchor_bounds: dict = {} # (bi, oi, bay_id) -> (x_lo, x_hi, y_lo, y_hi)
+        self.safe_anchor: dict = {}   # (bi, oi, bay_id) -> (x, y)
+
+
+def _anchor_bounds_from_aabb(bay: Bay, bb: tuple) -> tuple[int, int, int, int] | None:
+    lx0, ly0, lx1, ly1 = bb
+    x_lo = int(math.ceil(-lx0 - 1e-9))
+    y_lo = int(math.ceil(-ly0 - 1e-9))
+    x_hi = int(math.floor(bay.width - lx1 + 1e-9))
+    y_hi = int(math.floor(bay.height - ly1 + 1e-9))
+    if x_lo > x_hi or y_lo > y_hi:
+        return None
+    return x_lo, x_hi, y_lo, y_hi
 
 
 def precompute_features(prob_info: dict, bays: list[Bay]) -> Features:
@@ -48,6 +66,7 @@ def precompute_features(prob_info: dict, bays: list[Bay]) -> Features:
 
             polys = [_poly_from_verts(layer) for layer in shifted]
             F.local_polys[(bi, oi)] = polys
+            F.layer_aabb[(bi, oi)] = [_bounding_box(layer) for layer in shifted]
 
             areas = [(p.area if p is not None else 0.0) for p in polys]
             F.area_top[(bi, oi)] = areas[0] if areas else 0.0
@@ -61,10 +80,14 @@ def precompute_features(prob_info: dict, bays: list[Bay]) -> Features:
                 F.obb_local[(bi, oi)] = None
 
             fit = []
-            w, h = F.dims[(bi, oi)]
             for bid, bay in enumerate(bays):
-                if w <= bay.width + 1e-6 and h <= bay.height + 1e-6:
-                    fit.append(bid)
+                bounds = _anchor_bounds_from_aabb(bay, bb)
+                if bounds is None:
+                    continue
+                fit.append(bid)
+                F.anchor_bounds[(bi, oi, bid)] = bounds
+                x_lo, _x_hi, y_lo, _y_hi = bounds
+                F.safe_anchor[(bi, oi, bid)] = (x_lo, y_lo)
             F.bay_fit[(bi, oi)] = fit
     return F
 
@@ -83,12 +106,21 @@ def smooth_time_windows(prob_info: dict, F: Features,
     Block processing order is least-slack-first. For each block, candidate
     entry times in [release, due - proc] are sampled (capped at
     max_cands_per_block) plus a few tardy options. Cost combines added peak
-    load, variance contribution, and tardiness risk.
+    load, variance contribution, and objective-aware tardiness/delay risk.
     """
     blocks = prob_info["blocks"]
     n = len(blocks)
     if n == 0:
         return [], []
+
+    weights = prob_info.get("weights", {})
+    w1 = float(weights.get("w1", 1.0))
+    # Tardiness dominates the official objective on the training set. Keep the
+    # smoothing scale bounded so congestion still matters inside the on-time
+    # window, but make explicitly tardy candidates expensive enough that they
+    # are not chosen just to shave a small peak-load bump.
+    tard_weight = max(gamma_tard, min(2000.0, 0.05 * w1))
+    base_delay_weight = min(0.10 * tard_weight, 0.001 * w1)
 
     horizon = max(b["due_date"] + b["processing_time"] for b in blocks) + 8
     load = [0.0] * (horizon + 1)
@@ -110,6 +142,9 @@ def smooth_time_windows(prob_info: dict, F: Features,
         d = int(b["due_date"])
         p = int(b["processing_time"])
         w = float(b["workload"])
+        slack = d - r - p
+        slack_pressure = 2.0 / max(2.0, float(max(0, slack) + 2))
+        delay_weight = base_delay_weight * slack_pressure
 
         lo = r
         hi = max(r, d - p)
@@ -142,7 +177,11 @@ def smooth_time_windows(prob_info: dict, F: Features,
                 if new > peak:
                     peak = new
                 var_inc += new * new - old * old
-            cost = alpha_peak * peak + beta_var * var_inc + gamma_tard * tard
+            delay = max(0, e - r)
+            cost = (alpha_peak * peak
+                    + beta_var * var_inc
+                    + tard_weight * tard
+                    + delay_weight * delay)
             if cost < best_cost:
                 best_cost = cost
                 best_e = e

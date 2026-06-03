@@ -7,6 +7,7 @@ import time
 from utils import Bay, Block, check_collisions, check_entry, check_exit
 
 from .features import Features
+from .geometry import any_crane_obstructs_exact, crane_obstructs_exact, pair_collides_exact
 from .state import _bay_weights, _compute_z2
 
 _TEMPORAL_RANK_ALPHA = 0.05
@@ -31,6 +32,7 @@ def rank_bays_for_block(prob_info: dict, F: Features, bays: list[Bay],
     n_blocks = len(prob_info["blocks"])
     out: list[tuple[float, int, int]] = []
     avg_load = sum(bay_loads) / max(1, len(bays))
+    temporal_cache: dict[int, float] = {}
     for oi in range(len(blk["shape"])):
         fit = F.bay_fit.get((bi, oi), [])
         for bid in fit:
@@ -47,10 +49,13 @@ def rank_bays_for_block(prob_info: dict, F: Features, bays: list[Bay],
             if (n_blocks >= _TEMPORAL_RANK_MIN_BLOCKS
                     and bay_schedule is not None and earliest_entry is not None
                     and proc is not None and due is not None):
-                est_entry = _schedule_only_entry_proxy(bay_schedule[bid], earliest_entry, proc)
-                temporal_penalty = (
-                    _TEMPORAL_RANK_ALPHA * w1 * max(0, est_entry + proc - due)
-                )
+                cached = temporal_cache.get(bid)
+                if cached is None:
+                    est_entry = _schedule_only_entry_proxy(
+                        bay_schedule[bid], earliest_entry, proc)
+                    cached = _TEMPORAL_RANK_ALPHA * w1 * max(0, est_entry + proc - due)
+                    temporal_cache[bid] = cached
+                temporal_penalty = cached
             area_room = (bays[bid].width * bays[bid].height) - F.area_top.get((bi, oi), 0.0)
             score = temporal_penalty + w3 * pref_pen + w2 * imbalance + 1e-4 * area_room
             out.append((score, bid, oi))
@@ -102,6 +107,9 @@ def _anchor_bounds(bay: Bay, blk_aabb: tuple) -> tuple[int, int, int, int] | Non
 def _safe_anchor_position(bi: int, oi: int, prob_info: dict, F: Features,
                           bay: Bay) -> tuple[int, int] | None:
     """Return a verified bottom-left safe anchor, or None if no integer fit."""
+    cached = F.safe_anchor.get((bi, oi, bay.id))
+    if cached is not None:
+        return cached
     bb = F.aabb.get((bi, oi))
     if bb is None:
         return None
@@ -120,9 +128,11 @@ def _safe_anchor_position(bi: int, oi: int, prob_info: dict, F: Features,
 
 
 def _candidate_positions(bay: Bay, blk_aabb: tuple,
-                          placed_in_bay: list[Block]) -> list[tuple[int, int]]:
+                          placed_in_bay: list[Block],
+                          bounds: tuple[int, int, int, int] | None = None
+                          ) -> list[tuple[int, int]]:
     """Bottom-left fill candidates (same idea as baseline_greedy)."""
-    bounds = _anchor_bounds(bay, blk_aabb)
+    bounds = bounds if bounds is not None else _anchor_bounds(bay, blk_aabb)
     if bounds is None:
         return []
     x_lo, x_hi, y_lo, y_hi = bounds
@@ -170,7 +180,8 @@ def _find_earliest_slot(bay: Bay,
                          new_blk: Block,
                          r_time: int,
                          proc: int,
-                         deadline: float) -> tuple[int | None, int | None]:
+                         deadline: float,
+                         F: Features | None = None) -> tuple[int | None, int | None]:
     """Self-contained crane-feasible slot finder.
 
     Mirrors Stage-2/3/4 + future-exit checks of the Hermes custom slot
@@ -190,7 +201,11 @@ def _find_earliest_slot(bay: Bay,
             b for b, (a, e) in zip(placed_in_bay, schedule_in_bay)
             if a <= entry < e
         ]
-        if check_entry(bay, present_entry, new_blk, fast=True):
+        if F is None:
+            entry_blocked = bool(check_entry(bay, present_entry, new_blk, fast=True))
+        else:
+            entry_blocked = any_crane_obstructs_exact(F, present_entry, new_blk)
+        if entry_blocked:
             continue
 
         # Stage 3 ignores same-time exits, but Stage 5 replays EXIT ops by
@@ -202,14 +217,19 @@ def _find_earliest_slot(bay: Bay,
             if (a < exit_t < e)
             or (a < exit_t and e == exit_t and b.block_id > new_blk.block_id)
         ]
-        if check_exit(bay, present_exit, new_blk, fast=True):
+        if F is None:
+            exit_blocked = bool(check_exit(bay, present_exit, new_blk, fast=True))
+        else:
+            exit_blocked = any_crane_obstructs_exact(F, present_exit, new_blk)
+        if exit_blocked:
             continue
 
         s4_blocked = False
         for b, (a, e) in zip(placed_in_bay, schedule_in_bay):
             if not _time_overlap(entry, exit_t, a, e):
                 continue
-            if check_collisions(bay, [new_blk, b]):
+            if (pair_collides_exact(F, new_blk, b)
+                    if F is not None else check_collisions(bay, [new_blk, b])):
                 s4_blocked = True
                 break
         if s4_blocked:
@@ -222,7 +242,9 @@ def _find_earliest_slot(bay: Bay,
                 or (entry < e and e == exit_t and new_blk.block_id > b.block_id)
             )
             if new_present_for_exit:
-                if check_exit(bay, [new_blk, b], b, fast=True):
+                if (crane_obstructs_exact(F, new_blk, b)
+                        if F is not None
+                        else check_exit(bay, [new_blk, b], b, fast=True)):
                     future_exit_blocked = True
                     break
         if future_exit_blocked:
@@ -238,7 +260,9 @@ def _find_earliest_slot(bay: Bay,
             # Stage 2 considers same-time entries co-present, so use the
             # conservative condition even though Stage 5 orders ENTRY by id.
             if entry <= a < exit_t:
-                if check_entry(bay, [new_blk], b, fast=True):
+                if (crane_obstructs_exact(F, new_blk, b)
+                        if F is not None
+                        else check_entry(bay, [new_blk], b, fast=True)):
                     future_entry_blocked = True
                     break
         if future_entry_blocked:
@@ -340,7 +364,9 @@ def _safe_fallback_place(bi: int, prob_info: dict, F: Features, bays: list[Bay],
         blk_bb = F.aabb.get((bi, oi))
         if blk_bb is None:
             continue
-        cands = _candidate_positions(bay, blk_bb, bay_placed[bid])
+        cands = _candidate_positions(
+            bay, blk_bb, bay_placed[bid],
+            F.anchor_bounds.get((bi, oi, bid)))
         safe_pos = _safe_anchor_position(bi, oi, prob_info, F, bay)
         if safe_pos is not None and safe_pos not in cands:
             cands.insert(0, safe_pos)
@@ -349,7 +375,7 @@ def _safe_fallback_place(bi: int, prob_info: dict, F: Features, bays: list[Bay],
             if not bay.contains_block(new_blk):
                 continue
             e, e_t = _find_earliest_slot(bay, bay_placed[bid], bay_schedule[bid],
-                                          new_blk, start, p, deadline)
+                                          new_blk, start, p, deadline, F)
             if e is None:
                 continue
             tard = max(0, e_t - due)
@@ -454,13 +480,15 @@ def place_initial(prob_info: dict, F: Features, bays: list[Bay],
                     break
                 bay = bays[bid]
                 blk_bb = F.aabb[(bi, oi)]
-                cands = _candidate_positions(bay, blk_bb, bay_placed[bid])[:pos_cands_cap]
+                cands = _candidate_positions(
+                    bay, blk_bb, bay_placed[bid],
+                    F.anchor_bounds.get((bi, oi, bid)))[:pos_cands_cap]
                 for cx, cy in cands:
                     new_blk = Block(block_id=bi, block_data=blk, x=cx, y=cy, orient_idx=oi)
                     if not bay.contains_block(new_blk):
                         continue
                     e, e_t = _find_earliest_slot(bay, bay_placed[bid], bay_schedule[bid],
-                                                  new_blk, tgt_e, p, deadline)
+                                                  new_blk, tgt_e, p, deadline, F)
                     if e is None:
                         continue
                     tard = max(0, e_t - due)
@@ -478,13 +506,15 @@ def place_initial(prob_info: dict, F: Features, bays: list[Bay],
                         break
                     bay = bays[bid]
                     blk_bb = F.aabb[(bi, oi)]
-                    cands = _candidate_positions(bay, blk_bb, bay_placed[bid])[:pos_cands_cap]
+                    cands = _candidate_positions(
+                        bay, blk_bb, bay_placed[bid],
+                        F.anchor_bounds.get((bi, oi, bid)))[:pos_cands_cap]
                     for cx, cy in cands:
                         new_blk = Block(block_id=bi, block_data=blk, x=cx, y=cy, orient_idx=oi)
                         if not bay.contains_block(new_blk):
                             continue
                         e, e_t = _find_earliest_slot(bay, bay_placed[bid], bay_schedule[bid],
-                                                      new_blk, r, p, deadline)
+                                                      new_blk, r, p, deadline, F)
                         if e is None:
                             continue
                         tard = max(0, e_t - due)

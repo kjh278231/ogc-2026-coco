@@ -70,6 +70,7 @@ flowchart TD
 - `baseline/athena/placement.py`: bay ranking, slot search, initial placement
 - `baseline/athena/solution.py`: operations 변환, official feasibility 호출
 - `baseline/athena/state.py`: incremental SA state, objective helpers
+- `baseline/athena/geometry.py`: precomputed layer geometry를 쓰는 Athena-local exact geometry helper
 - `baseline/athena/fast_checks.py`: incremental feasibility filter와 pair/crane cache
 - `baseline/athena/moves.py`: small/medium/large move 구현
 - `baseline/athena/sa.py`: SA profile, temperature, acceptance, `sa_loop`
@@ -104,15 +105,41 @@ flowchart TD
 F.aabb[(bi, oi)]       = axis-aligned bounding box
 F.obb_local[(bi, oi)]  = oriented bounding box
 F.local_polys[(bi, oi)] = layer별 polygon
+F.layer_aabb[(bi, oi)] = layer별 AABB
 F.n_layers[(bi, oi)]   = layer 개수
 F.area_top[(bi, oi)]   = bottom footprint area
 F.area_sum[(bi, oi)]   = 전체 layer area 합
 F.crane_risk[(bi, oi)] = crane 충돌 위험 휴리스틱
 F.dims[(bi, oi)]       = width, height
 F.bay_fit[(bi, oi)]    = 들어갈 수 있는 bay 목록
+F.anchor_bounds[(bi, oi, bid)] = bay별 안전 anchor 범위
+F.safe_anchor[(bi, oi, bid)]   = bay별 기본 안전 anchor
 ```
 
-현재 배치 단계에서 특히 많이 쓰는 값은 `aabb`, `dims`, `area_top`, `bay_fit`이다. `obb_local`과 `crane_risk`도 계산해 두지만, 현재 코드에서는 확장용 성격이 더 강하다.
+현재 배치 단계에서 특히 많이 쓰는 값은 `aabb`, `layer_aabb`, `local_polys`, `area_top`,
+`bay_fit`, `anchor_bounds`, `safe_anchor`이다. `world_geom_cache`는 SA와 placement가
+특정 `(block, orientation, x, y)` 배치를 반복해서 검사할 때 local polygon을 world
+좌표로 translate한 결과를 재사용한다. `obb_local`과 `crane_risk`도 계산해 두지만,
+현재 코드에서는 확장용 성격이 더 강하다.
+
+### Fast geometry path
+
+`baseline/athena/geometry.py`는 official checker의 물리 규칙을 바꾸지 않고,
+Athena가 미리 계산한 geometry를 이용해 반복 검사를 줄인다. 특히 crane entry/exit는
+여전히 `j >= k` descent rule을 그대로 적용한다. 다만 매번 `Block.layers_at_pos()`와
+`_poly_from_verts()`를 새로 거치지 않고, `F.local_polys`, `F.layer_aabb`,
+`F.world_geom_cache`를 사용한다.
+
+이 helper는 두 곳에서 쓰인다.
+
+- `placement._find_earliest_slot`: initial placement와 large move repair의 slot 후보를
+  검사할 때 precomputed geometry로 entry/exit/collision을 빠르게 거른다.
+- `fast_checks.fast_check_move`: SA small/medium move가 바꾼 block과 주변 block의
+  pair collision, crane obstruction을 cached exact check로 검사한다.
+
+최종 권위는 여전히 `utils.check_feasibility`다. 초기해, fallback, SA best 후보는
+official checker를 통과해야 반환될 수 있으므로, fast geometry path는 “검사 비용을
+줄이는 필터”이지 feasibility 정의를 바꾸는 별도 scorer가 아니다.
 
 ### 직관
 
