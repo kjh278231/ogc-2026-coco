@@ -80,11 +80,13 @@ def precompute_features(prob_info: dict, bays: list[Bay]) -> Features:
                 F.obb_local[(bi, oi)] = None
 
             fit = []
+            w, h = F.dims[(bi, oi)]
             for bid, bay in enumerate(bays):
+                if w <= bay.width + 1e-6 and h <= bay.height + 1e-6:
+                    fit.append(bid)
                 bounds = _anchor_bounds_from_aabb(bay, bb)
                 if bounds is None:
                     continue
-                fit.append(bid)
                 F.anchor_bounds[(bi, oi, bid)] = bounds
                 x_lo, _x_hi, y_lo, _y_hi = bounds
                 F.safe_anchor[(bi, oi, bid)] = (x_lo, y_lo)
