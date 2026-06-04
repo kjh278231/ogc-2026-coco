@@ -43,7 +43,8 @@ Athena Solver는 이 문제를 exact solver처럼 완전히 수학적으로 풀�
 ```mermaid
 flowchart TD
     A["입력 prob_info"] --> B["Phase 1: feature precompute"]
-    B --> C["Phase 2: global time-window smoothing"]
+    B --> P["TimePlan + emergency serial incumbent"]
+    P --> C["Phase 2: global time-window smoothing"]
     C --> D["Phase 3: bay/orientation candidate ranking"]
     D --> E["Phase 4: sweep-based initial placement"]
     E --> F{"초기해 feasible?"}
@@ -56,10 +57,11 @@ flowchart TD
 큰 방향은 이렇다.
 
 1. block과 orientation별로 계산을 미리 해둔다.
-2. block들이 시간축에서 너무 몰리지 않도록 target entry time을 정한다.
-3. 각 block에 대해 어떤 bay와 orientation이 좋아 보이는지 점수를 매긴다.
-4. target entry time 순서대로 block을 하나씩 실제 위치에 배치한다.
-5. Simulated Annealing으로 entry time, bay, 위치, 방향을 바꿔 보며 objective를 줄인다.
+2. `timelimit`과 block 수에 맞춰 `TimePlan`을 만들고, 빠른 serial incumbent를 확보한다.
+3. block들이 시간축에서 너무 몰리지 않도록 target entry time을 정한다.
+4. 각 block에 대해 어떤 bay와 orientation이 좋아 보이는지 점수를 매긴다.
+5. target entry time 순서대로 block을 하나씩 실제 위치에 배치한다.
+6. Simulated Annealing으로 entry time, bay, 위치, 방향을 바꿔 보며 objective를 줄인다.
 
 ### 코드 모듈 구조
 
@@ -527,14 +529,15 @@ solution을 고른다.
 
 초기 배치가 실패하거나 feasible이더라도 tardiness가 남을 수 있으므로 `algorithm`에는 여러 안전장치와 비교 단계가 있다.
 
-1. 기본 `target_entry`로 `place_initial`
-2. 기본 초기해가 infeasible이거나 `obj1 > 0`이면 `target_entry = release_time`으로 다시 `place_initial`
-3. 두 초기 후보를 `check_feasibility` objective로 비교해 더 낮은 objective를 선택
-4. 그래도 infeasible이면 repair와 all-forced placement로 feasible solution 확보
-5. 이후 SA 수행
-6. SA가 feasible solution을 못 찾았지만 initial solution이 feasible이면 initial solution 반환
+1. feature 계산 직후 repair ordering 기반 `build_safe_serial_assignments`로 emergency incumbent를 만든다.
+2. 기본 `target_entry`로 `place_initial`
+3. 기본 초기해가 infeasible이거나 `obj1 > 0`이면 `target_entry = release_time`으로 다시 `place_initial`
+4. 두 초기 후보를 `check_feasibility` objective로 비교해 더 낮은 objective를 선택
+5. 그래도 infeasible이면 repair를 시도하고, 마지막에는 이미 만든 emergency incumbent 또는 late all-forced placement로 feasible solution을 확보
+6. 이후 SA 수행
+7. SA가 feasible solution을 못 찾았지만 initial solution이 feasible이면 initial solution 반환
 
-즉, 목표는 "무조건 멋진 최적화"가 아니라 "제한 시간 안에 feasible solution을 확보하고, 가능하면 개선"이다.
+즉, 목표는 "무조건 멋진 최적화"가 아니라 "제한 시간 안에 feasible solution을 확보하고, 가능하면 개선"이다. emergency incumbent는 objective가 좋지 않을 수 있지만 매우 빠르게 만들어져, 숨겨진 `timelimit`이 짧을 때도 빈 solution으로 끝나는 위험을 줄인다.
 `release_time` 후보는 `athena.init.fallback` event로 기록되며, `reason`은 `"infeasible"` 또는 `"tardy_compare"`이고 `selected`는 실제 채택 여부를 나타낸다.
 
 ---
@@ -545,8 +548,9 @@ solution을 고른다.
 
 - `hard_deadline`
 - `safety`
-- `init_deadline`
-- `sa_deadline`
+- `TimePlan`
+- `init_deadline`, `fallback_deadline`, `repair_deadline`
+- `sa_deadline`, `gather_deadline`
 
 `timelimit`이 들어오면 전체 hard deadline을 잡고, 약간의 safety margin을 둔다.
 
@@ -554,7 +558,15 @@ solution을 고른다.
 safety = min(0.5, max(0.05, timelimit * 0.02))
 ```
 
-초기 배치는 전체 시간의 약 30% 근처에서 끝내려고 하고, SA는 약 92% 지점까지 사용한다. 마지막에는 solution 변환과 로그 종료를 할 시간이 필요하기 때문이다.
+`TimePlan`은 `timelimit`을 세 tier로 나눠 constructive phase가 시간을 과하게 쓰지 않도록 한다.
+
+| tier | 조건 | init budget | fallback/repair | SA |
+| --- | --- | --- | --- | --- |
+| `short` | `timelimit <= 45` | 작은 instance 25%, 큰 instance 30% | 45% / 55% 지점까지 | 92% 지점까지 |
+| `medium` | `45 < timelimit <= 180` | 기존 60초 정책 유지: 작은 instance 35%, 큰 instance 45% | 55% / 65% 지점까지 | 92% 지점까지 |
+| `long` | `timelimit > 180` | 최대 60초 | 최대 75초 / 90초 | 92% 지점까지 |
+
+마지막에는 solution 변환, worker result 수집, 로그 종료를 위해 `safety`와 `gather_deadline`을 남긴다.
 
 ---
 
@@ -573,6 +585,8 @@ safety = min(0.5, max(0.05, timelimit * 0.02))
 ```text
 algo.start
 athena.features.done
+athena.time_plan
+athena.init.emergency
 athena.smoothing.done
 athena.init.done
 athena.init.fallback
@@ -594,6 +608,8 @@ function algorithm(prob_info, timelimit):
     bays, blocks, weights 읽기
 
     F = precompute_features(blocks, bays)
+    plan = make_time_plan(timelimit, n_blocks)
+    emergency = build_safe_serial_assignments(...)
 
     target_entry, target_orient = smooth_time_windows(blocks, F)
 
@@ -610,7 +626,7 @@ function algorithm(prob_info, timelimit):
         둘 중 objective가 더 낮은 초기해 선택
 
     if still infeasible:
-        repair 또는 all-forced placement 수행
+        repair 또는 emergency/all-forced placement 수행
 
     best = simulated_annealing(assignments)
 

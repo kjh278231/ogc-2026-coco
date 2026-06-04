@@ -34,6 +34,33 @@ def _silence_stdout():
         sys.stdout = saved
 
 
+def _make_time_plan(t_start: float, timelimit: float, hard_deadline: float,
+                    safety: float, n_blocks: int) -> tuple:
+    t = max(0.0, timelimit)
+    if t <= 45.0:
+        tier = "short"
+        init_duration = max(2.0, t * (0.30 if n_blocks >= 150 else 0.25))
+        fallback_duration = max(3.0, t * 0.45)
+        repair_duration = max(4.0, t * 0.55)
+    elif t <= 180.0:
+        tier = "medium"
+        init_duration = max(2.0, t * (0.45 if n_blocks >= 150 else 0.35))
+        fallback_duration = max(4.0, t * 0.55)
+        repair_duration = max(5.0, t * 0.65)
+    else:
+        tier = "long"
+        init_duration = min(60.0, max(20.0, t * 0.20))
+        fallback_duration = min(75.0, max(30.0, t * 0.30))
+        repair_duration = min(90.0, max(45.0, t * 0.35))
+
+    gather_margin = min(0.5, max(0.05, t * 0.01))
+    soft_end = hard_deadline - safety
+    deadline = lambda d: min(soft_end, t_start + max(0.0, d))
+    return (tier, deadline(init_duration), deadline(fallback_duration),
+            deadline(repair_duration), deadline(max(4.0, t * 0.92)),
+            hard_deadline - gather_margin)
+
+
 def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
     """Athena solver entry point. Returns a solution dict in the canonical
     {"operations": {time_str: [op,...]}} format."""
@@ -57,15 +84,43 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
     # Phase 1
     F = precompute_features(prob_info, bays)
     _emit("athena.features.done", elapsed=round(time.time() - t_start, 3))
+    (time_tier, init_deadline, fallback_deadline, repair_deadline,
+     sa_deadline, gather_deadline) = _make_time_plan(
+        t_start, timelimit, hard_deadline, safety, n,
+    )
+    _emit("athena.time_plan",
+          tier=time_tier,
+          init_deadline=round(init_deadline - t_start, 3),
+          fallback_deadline=round(fallback_deadline - t_start, 3),
+          repair_deadline=round(repair_deadline - t_start, 3),
+          sa_deadline=round(sa_deadline - t_start, 3),
+          gather_deadline=round(gather_deadline - t_start, 3))
+
+    emergency_assign = None
+    emergency_res = None
+    emergency_sol = {"operations": {}}
+    emergency_obj = float("inf")
+    emergency_missing = 0
+    if time.time() < hard_deadline - safety:
+        emergency_assign, emergency_missing = build_safe_serial_assignments(
+            prob_info, F, bays,
+        )
+        emergency_res, emergency_sol = evaluate_solution(prob_info, emergency_assign)
+        emergency_obj = (
+            float(emergency_res["objective"]) if emergency_res["feasible"] else float("inf")
+        )
+        _emit("athena.init.emergency",
+              elapsed=round(time.time() - t_start, 3),
+              feasible=bool(emergency_res["feasible"]),
+              stage=str(emergency_res.get("stage")),
+              objective=emergency_obj,
+              missing=emergency_missing)
 
     # Phase 2
     target_entry, target_orient = smooth_time_windows(prob_info, F)
     _emit("athena.smoothing.done", elapsed=round(time.time() - t_start, 3))
 
     # Phase 4 (uses phase 3 ranker internally)
-    init_fraction = 0.45 if n >= 150 else 0.35
-    init_deadline = min(hard_deadline - safety,
-                        t_start + max(2.0, timelimit * init_fraction))
     assignments, n_forced, n_unplaced = place_initial(
         prob_info, F, bays,
         target_entry, target_orient,
@@ -82,8 +137,6 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
           n_forced=n_forced,
           n_unplaced=n_unplaced)
 
-    fallback_deadline = min(hard_deadline - safety,
-                            t_start + max(4.0, timelimit * 0.55))
     init_tardiness = float(init_res.get("obj1") or 0.0) if init_res["feasible"] else 0.0
     fallback_reason = None
     if not init_res["feasible"]:
@@ -120,8 +173,6 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
             init_res = fb_res
 
     if not init_res["feasible"] and time.time() < hard_deadline - safety:
-        repair_deadline = min(hard_deadline - safety,
-                              t_start + max(5.0, timelimit * 0.65))
         rep_assign, rep_res, rep_sol, rep_count = repair_conflict_closure(
             prob_info, F, bays, assignments, w1, w2, w3, repair_deadline,
         )
@@ -142,25 +193,27 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
     # boundary-safe serial solution. This may be tardy, but it never creates
     # an invalid coordinate and keeps SA in the feasible region.
     if not init_res["feasible"]:
-        edd_order = sorted(
-            range(n),
-            key=lambda i: (
-                blocks[i]["due_date"] - blocks[i]["release_time"] - blocks[i]["processing_time"],
-                blocks[i]["due_date"],
-                -max(F.area_sum.get((i, oi), 0.0) for oi in range(len(blocks[i]["shape"]))),
-            ),
-        )
-        all_forced, missing_forced = build_safe_serial_assignments(
-            prob_info, F, bays, edd_order,
-        )
-        af_res, af_sol = evaluate_solution(prob_info, all_forced)
-        af_obj = float(af_res["objective"]) if af_res["feasible"] else float("inf")
+        if emergency_assign is not None:
+            all_forced = emergency_assign
+            missing_forced = emergency_missing
+            af_res = emergency_res
+            af_sol = emergency_sol
+            af_obj = emergency_obj
+            af_source = "emergency"
+        else:
+            all_forced, missing_forced = build_safe_serial_assignments(
+                prob_info, F, bays,
+            )
+            af_res, af_sol = evaluate_solution(prob_info, all_forced)
+            af_obj = float(af_res["objective"]) if af_res["feasible"] else float("inf")
+            af_source = "late"
         _emit("athena.init.all_forced",
               elapsed=round(time.time() - t_start, 3),
               feasible=bool(af_res["feasible"]),
               stage=str(af_res.get("stage")),
               objective=af_obj,
-              missing=missing_forced)
+              missing=missing_forced,
+              source=af_source)
         if af_res["feasible"] or af_obj < init_obj:
             assignments = all_forced
             init_obj = af_obj
@@ -173,9 +226,6 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
     # server allows 4 cores / 400% CPU). Workers stop at `sa_deadline`; the
     # main process gathers their results no later than `gather_deadline`
     # (< hard_deadline) so the total wall time stays within `timelimit`.
-    sa_deadline = min(hard_deadline - safety, t_start + max(4.0, timelimit * 0.92))
-    gather_margin = min(0.5, max(0.05, timelimit * 0.01))
-    gather_deadline = hard_deadline - gather_margin
     max_workers = min(4, os.cpu_count() or 1)
     # Optional override (A/B testing / tuning). OGC2026_SA_WORKERS caps the
     # worker count; setting it to 1 forces the single-start path. Never exceeds
