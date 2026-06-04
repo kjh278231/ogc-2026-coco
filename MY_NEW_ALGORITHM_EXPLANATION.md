@@ -521,7 +521,10 @@ seed도 서로 다르다. 실제 적용된 move cutoffs는 `sa.temperature.init`
   파일에 기록해 로그 충돌을 막는다.
 
 main process는 모든 worker 결과 중 **feasible이면서 objective가 가장 낮은**
-solution을 고른다.
+solution을 고른다. `long` tier에서는 한 번의 거대한 SA run으로 끝내지 않고,
+약 90초 단위의 parallel SA batch를 반복한다. 각 batch는 현재 best assignment에서
+다시 출발하되 random seed를 바꿔 restart 효과를 내며, batch 결과가 official
+checker를 통과하고 objective를 낮출 때만 다음 batch의 시작점으로 승격된다.
 
 ---
 
@@ -591,6 +594,11 @@ athena.smoothing.done
 athena.init.done
 athena.init.fallback
 athena.init.all_forced
+athena.parallel_sa.start
+athena.parallel_sa.batch_start
+athena.parallel_sa.batch_done
+athena.parallel_sa.batch_selected
+athena.parallel_sa.done
 sa.improvement
 sa.complete
 algo.end

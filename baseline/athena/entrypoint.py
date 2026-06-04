@@ -268,28 +268,62 @@ def algorithm(prob_info: dict, timelimit: float = 60.0) -> dict:
         _emit("athena.parallel_sa.start",
               n_workers=max_workers, remaining=round(remaining, 3),
               worker_deadline=round(sa_deadline - t_start, 3),
-              gather_deadline=round(gather_deadline - t_start, 3))
-        try:
-            p_assign, p_obj, worker_results = parallel_sa_multi_start(
-                prob_info, assignments, w1, w2, w3,
-                sa_deadline, gather_deadline, max_workers, base_seed=base_seed,
-                event_log_base=ev_base, profiles_override=profiles_override,
+              gather_deadline=round(gather_deadline - t_start, 3),
+              mode="batched" if time_tier == "long" else "single")
+        current_assign = assignments
+        batch_idx = 0
+        all_worker_results = []
+        while time.time() < sa_deadline and current_assign is not None:
+            if time_tier == "long":
+                batch_deadline = min(sa_deadline, time.time() + 90.0)
+                if batch_deadline - time.time() < 30.0:
+                    break
+            else:
+                batch_deadline = sa_deadline
+            batch_idx += 1
+            batch_gather = min(gather_deadline, batch_deadline + 1.0)
+            batch_seed = (
+                base_seed + batch_idx * 104729 if time_tier == "long" else base_seed
             )
-        except Exception as exc:
-            p_assign, p_obj, worker_results = None, float("inf"), []
-            _emit("athena.parallel_sa.exception", error=repr(exc))
+            _emit("athena.parallel_sa.batch_start",
+                  batch=batch_idx,
+                  worker_deadline=round(batch_deadline - t_start, 3),
+                  remaining=round(batch_deadline - time.time(), 3))
+            try:
+                p_assign, p_obj, worker_results = parallel_sa_multi_start(
+                    prob_info, current_assign, w1, w2, w3,
+                    batch_deadline, batch_gather, max_workers,
+                    base_seed=batch_seed,
+                    event_log_base=ev_base, profiles_override=profiles_override,
+                )
+            except Exception as exc:
+                p_assign, p_obj, worker_results = None, float("inf"), []
+                _emit("athena.parallel_sa.exception", batch=batch_idx,
+                      error=repr(exc))
+            all_worker_results.extend(worker_results)
+            _emit("athena.parallel_sa.batch_done",
+                  batch=batch_idx,
+                  feasible=p_assign is not None, objective=p_obj,
+                  n_results=len(worker_results),
+                  n_feasible=sum(1 for r in worker_results if r.get("feasible")))
+            if p_assign is not None:
+                # Re-verify the winning worker's assignment with the official
+                # checker in the main process before trusting it.
+                res, sol = evaluate_solution(prob_info, p_assign)
+                if res["feasible"] and float(res["objective"]) < best_obj:
+                    best_assign = p_assign
+                    best_sol = sol
+                    best_obj = float(res["objective"])
+                    current_assign = best_assign
+                    _emit("athena.parallel_sa.batch_selected",
+                          batch=batch_idx, objective=best_obj)
+            if time_tier != "long":
+                break
         _emit("athena.parallel_sa.done",
-              feasible=p_assign is not None, objective=p_obj,
-              n_results=len(worker_results),
-              n_feasible=sum(1 for r in worker_results if r.get("feasible")))
-        if p_assign is not None:
-            # Re-verify the winning worker's assignment with the official
-            # checker in the main process before trusting it.
-            res, sol = evaluate_solution(prob_info, p_assign)
-            if res["feasible"]:
-                best_assign = p_assign
-                best_sol = sol
-                best_obj = float(res["objective"])
+              feasible=best_assign is not None, objective=best_obj,
+              n_results=len(all_worker_results),
+              n_feasible=sum(1 for r in all_worker_results if r.get("feasible")),
+              batches=batch_idx)
 
     if init_res["feasible"] and best_assign is None and time.time() < sa_deadline:
         # Fallback: single-start SA in the main process. Taken when only one
