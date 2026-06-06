@@ -1,0 +1,7 @@
+{"t": 0.3521, "event": "sa.worker.start", "seed": 36103, "profile": "local_position"}
+{"t": 0.4808, "event": "sa.temperature.init", "T0": 10385.273835932885, "T_min": 10.385273835932885, "cooling": 0.999, "base_full_period": 100, "n_blocks": 250, "profile": "local_position"}
+{"t": 0.4949, "event": "sa.accept.worse", "iteration": 36, "T": 10027.9011, "curr_obj": 66177423.73845957, "new_obj": 66184134.36664045, "delta_obj": 6710.628180876374, "delta_tardiness": 0.0, "accept_prob": 0.51212, "changed_blocks": [125], "move_type": "medium_bay_change"}
+{"t": 4.6169, "event": "sa.improvement", "iteration": 44, "move_type": "large", "objective": 63740680.97737833}
+{"t": 4.9058, "event": "sa.full_check.best", "iteration": 46, "move_type": "small_entry_shift", "objective": 63714013.97737833, "fast_obj": 63714013.97737833}
+{"t": 36.1868, "event": "sa.complete", "iterations": 117, "improvements": 2, "accepts": 18, "worse_accepts": 1, "worse_z1_accepts": 0, "fast_rejects": 92, "worse_limit_rejects": 0, "full_checks": 1, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 46, "best_objective": 63714013.97737833, "final_T": 9238.045029, "T0": 10385.273835932885, "pair_cache_size": 234, "crane_cache_size": 278}
+{"t": 36.1933, "event": "sa.worker.done", "seed": 36103, "profile": "local_position", "feasible": true, "objective": 63714013.97737833, "iterations": 117}

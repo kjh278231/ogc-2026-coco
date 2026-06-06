@@ -1,0 +1,6 @@
+{"t": 0.266, "event": "sa.worker.start", "seed": 28184, "profile": "bay_reassign"}
+{"t": 0.397, "event": "sa.temperature.init", "T0": 12421.00314787338, "T_min": 12.42100314787338, "cooling": 0.998, "base_full_period": 100, "n_blocks": 250, "profile": "bay_reassign"}
+{"t": 0.403, "event": "sa.reject.worse_limit", "iteration": 11, "T": 12174.807, "curr_obj": Infinity, "new_obj": 120098091.95130672, "delta_obj": 18605.0, "delta_tardiness": 1.0, "effective_delta": 55815.0, "hard_limit": 1000.0, "move_type": "small_entry_shift", "changed_blocks": [144]}
+{"t": 11.8632, "event": "sa.fast_full_mismatch", "iteration": 19, "move_type": "small_orient_swap", "fast_feasible": true, "full_feasible": false, "fast_obj": 120079486.95130672, "changed_blocks": [114], "action": "rollback_snapshot"}
+{"t": 21.4799, "event": "sa.complete", "iterations": 32, "improvements": 0, "accepts": 1, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 24, "worse_limit_rejects": 1, "full_checks": 1, "mismatches": 1, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 0, "best_objective": Infinity, "final_T": 11650.216418, "T0": 12421.00314787338, "pair_cache_size": 149, "crane_cache_size": 228}
+{"t": 21.4799, "event": "sa.worker.done", "seed": 28184, "profile": "bay_reassign", "feasible": false, "objective": Infinity, "iterations": 32}

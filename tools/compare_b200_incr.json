@@ -1,0 +1,38 @@
+[
+  {
+    "instance": "my_B5_b200_hard",
+    "algo": "hermes",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 31947.0,
+    "obj2": 2245.3746480092004,
+    "obj3": 310.0,
+    "total": 95863612.99718407,
+    "wall": 27.10596203804016,
+    "error": null
+  },
+  {
+    "instance": "my_B5_b200_hard",
+    "algo": "greedy",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 26350.0,
+    "obj2": 2592.767836768495,
+    "obj3": 285.0,
+    "total": 79075017.14269415,
+    "wall": 27.118186950683594,
+    "error": null
+  },
+  {
+    "instance": "my_B5_b200_hard",
+    "algo": "athena",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 25190.0,
+    "obj2": 2711.554071761572,
+    "obj3": 966.0,
+    "total": 75606182.4325741,
+    "wall": 27.619831800460815,
+    "error": null
+  }
+]

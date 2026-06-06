@@ -1,0 +1,14 @@
+{"t": 0.001, "event": "algo.start", "timelimit": 20.0}
+{"t": 0.001, "event": "algo.context", "n_blocks": 100, "n_bays": 2, "w1": 29091.0, "w2": 7.0, "w3": 200.0, "algo": "athena"}
+{"t": 0.05, "event": "athena.features.done", "elapsed": 0.05}
+{"t": 0.05, "event": "athena.time_plan", "tier": "short", "init_deadline": 5.0, "fallback_deadline": 9.0, "repair_deadline": 11.0, "sa_deadline": 18.4, "gather_deadline": 19.8}
+{"t": 0.063, "event": "athena.init.emergency", "elapsed": 0.063, "feasible": true, "stage": "5", "objective": 426412912.3816993, "missing": 0}
+{"t": 0.064, "event": "athena.smoothing.done", "elapsed": 0.064}
+{"t": 3.4598, "event": "athena.init.done", "elapsed": 3.46, "feasible": true, "stage": "5", "objective": 36208870.147567175, "n_forced": 0, "n_unplaced": 0}
+{"t": 7.1689, "event": "athena.init.fallback", "elapsed": 7.169, "feasible": true, "stage": "5", "objective": 34400211.78968773, "n_forced": 0, "n_unplaced": 0, "reason": "tardy_compare", "selected": true}
+{"t": 7.2001, "event": "sa.temperature.init", "T0": 19421.628732855927, "T_min": 19.421628732855925, "cooling": 0.998, "base_full_period": 50, "n_blocks": 100, "profile": "balanced", "move_probs": [0.55, 0.88, 0.12]}
+{"t": 7.841, "event": "sa.improvement", "iteration": 3, "move_type": "large", "objective": 34121655.05039942}
+{"t": 8.5785, "event": "sa.improvement", "iteration": 8, "move_type": "large", "objective": 33460960.514015976}
+{"t": 11.0267, "event": "sa.improvement", "iteration": 28, "move_type": "large", "objective": 32239138.514015976}
+{"t": 18.4268, "event": "sa.complete", "iterations": 127, "improvements": 3, "accepts": 13, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 93, "worse_limit_rejects": 0, "full_checks": 0, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 28, "best_objective": 32239138.514015976, "final_T": 15061.367008, "T0": 19421.628732855927, "pair_cache_size": 368, "crane_cache_size": 552}
+{"t": 18.4268, "event": "algo.end", "best_objective": 32239138.514015976, "wall_time": 18.427, "has_solution": true, "sa_iterations": 127, "sa_improvements": 3}

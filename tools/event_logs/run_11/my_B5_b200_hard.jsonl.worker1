@@ -1,0 +1,32 @@
+{"t": 0.1334, "event": "sa.worker.start", "seed": 20265, "profile": "large_repair"}
+{"t": 0.1514, "event": "sa.temperature.init", "T0": 71.96611460571066, "T_min": 0.07196611460571066, "cooling": 0.997, "base_full_period": 100, "n_blocks": 200, "profile": "large_repair"}
+{"t": 0.6723, "event": "sa.improvement", "iteration": 1, "move_type": "large", "objective": 105582390.6605748}
+{"t": 1.403, "event": "sa.improvement", "iteration": 4, "move_type": "large", "objective": 97304503.64483516}
+{"t": 2.0786, "event": "sa.improvement", "iteration": 5, "move_type": "large", "objective": 91460949.79366249}
+{"t": 3.2362, "event": "sa.improvement", "iteration": 6, "move_type": "large", "objective": 83657093.42637363}
+{"t": 3.2762, "event": "sa.full_check.best", "iteration": 8, "move_type": "medium_bay_change", "objective": 83656719.3930403, "fast_obj": 83656719.3930403}
+{"t": 4.503, "event": "sa.improvement", "iteration": 9, "move_type": "large", "objective": 77752226.30461803}
+{"t": 5.5476, "event": "sa.improvement", "iteration": 10, "move_type": "large", "objective": 74368938.07882585}
+{"t": 6.7455, "event": "sa.improvement", "iteration": 11, "move_type": "large", "objective": 70153495.38197802}
+{"t": 7.9485, "event": "sa.improvement", "iteration": 12, "move_type": "large", "objective": 68121852.33846153}
+{"t": 9.2993, "event": "sa.improvement", "iteration": 13, "move_type": "large", "objective": 66697255.5798084}
+{"t": 9.3338, "event": "sa.full_check.best", "iteration": 16, "move_type": "small_entry_shift", "objective": 66688255.5798084, "fast_obj": 66688255.5798084}
+{"t": 10.5469, "event": "sa.improvement", "iteration": 17, "move_type": "large", "objective": 63080431.567870304}
+{"t": 11.7989, "event": "sa.improvement", "iteration": 23, "move_type": "large", "objective": 61252246.144288875}
+{"t": 12.9275, "event": "sa.improvement", "iteration": 24, "move_type": "large", "objective": 59389583.58393515}
+{"t": 14.1812, "event": "sa.improvement", "iteration": 28, "move_type": "large", "objective": 55974832.12263736}
+{"t": 16.6198, "event": "sa.improvement", "iteration": 32, "move_type": "large", "objective": 55771484.29582418}
+{"t": 17.8111, "event": "sa.improvement", "iteration": 34, "move_type": "large", "objective": 55251358.64483517}
+{"t": 19.2823, "event": "sa.improvement", "iteration": 36, "move_type": "large", "objective": 53774557.67663965}
+{"t": 20.5255, "event": "sa.improvement", "iteration": 37, "move_type": "large", "objective": 52775834.20899042}
+{"t": 21.7991, "event": "sa.improvement", "iteration": 41, "move_type": "large", "objective": 50780874.077802196}
+{"t": 21.8621, "event": "sa.full_check.best", "iteration": 42, "move_type": "small_entry_shift", "objective": 50777874.077802196, "fast_obj": 50777874.077802196}
+{"t": 23.1338, "event": "sa.improvement", "iteration": 47, "move_type": "large", "objective": 49120529.297142856}
+{"t": 25.8647, "event": "sa.improvement", "iteration": 49, "move_type": "large", "objective": 47937072.99164835}
+{"t": 27.3609, "event": "sa.improvement", "iteration": 50, "move_type": "large", "objective": 47460040.6403832}
+{"t": 28.6353, "event": "sa.improvement", "iteration": 52, "move_type": "large", "objective": 47197229.6927045}
+{"t": 28.6913, "event": "sa.full_check.best", "iteration": 54, "move_type": "small_entry_shift", "objective": 47182229.6927045, "fast_obj": 47182229.6927045}
+{"t": 28.7333, "event": "sa.full_check.best", "iteration": 55, "move_type": "small_entry_shift", "objective": 47173229.6927045, "fast_obj": 47173229.6927045}
+{"t": 32.696, "event": "sa.improvement", "iteration": 61, "move_type": "large", "objective": 46868289.73010989}
+{"t": 35.0317, "event": "sa.complete", "iterations": 71, "improvements": 28, "accepts": 31, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 31, "worse_limit_rejects": 0, "full_checks": 5, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 61, "best_objective": 46868289.73010989, "final_T": 58.141241, "T0": 71.96611460571066, "pair_cache_size": 59, "crane_cache_size": 38}
+{"t": 35.0327, "event": "sa.worker.done", "seed": 20265, "profile": "large_repair", "feasible": true, "objective": 46868289.73010989, "iterations": 71}

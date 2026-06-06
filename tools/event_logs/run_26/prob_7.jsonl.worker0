@@ -1,0 +1,11 @@
+{"t": 0.2032, "event": "sa.worker.start", "seed": 12346, "profile": "balanced"}
+{"t": 0.3238, "event": "sa.temperature.init", "T0": 17803.32657588495, "T_min": 17.80332657588495, "cooling": 0.998, "base_full_period": 50, "n_blocks": 150, "profile": "balanced"}
+{"t": 7.1633, "event": "sa.full_check.best", "iteration": 24, "move_type": "small_entry_shift", "objective": 40964852.783492826, "fast_obj": 40964852.783492826}
+{"t": 24.9605, "event": "sa.full_check.best", "iteration": 106, "move_type": "small_entry_shift", "objective": 40929296.783492826, "fast_obj": 40929296.783492826}
+{"t": 26.7471, "event": "sa.full_check.best", "iteration": 110, "move_type": "small_entry_shift", "objective": 40893740.783492826, "fast_obj": 40893740.783492826}
+{"t": 33.0346, "event": "sa.accept.worse_tardiness", "iteration": 136, "T": 13587.0205, "curr_obj": 40893740.783492826, "new_obj": 40911518.783492826, "delta_obj": 17778.0, "delta_tardiness": 1.0, "accept_prob": 0.019735, "changed_blocks": [91], "move_type": "small_entry_shift"}
+{"t": 40.1567, "event": "sa.full_check.best", "iteration": 165, "move_type": "small_entry_shift", "objective": 40840406.783492826, "fast_obj": 40840406.783492826}
+{"t": 43.5173, "event": "sa.full_check.best", "iteration": 175, "move_type": "small_entry_shift", "objective": 40822628.783492826, "fast_obj": 40822628.783492826}
+{"t": 43.6349, "event": "sa.improvement", "iteration": 177, "move_type": "large", "objective": 40804850.783492826}
+{"t": 43.6349, "event": "sa.complete", "iterations": 177, "improvements": 6, "accepts": 17, "worse_accepts": 1, "worse_z1_accepts": 1, "fast_rejects": 127, "worse_limit_rejects": 0, "full_checks": 5, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 177, "best_objective": 40804850.783492826, "final_T": 12491.280656, "T0": 17803.32657588495, "pair_cache_size": 327, "crane_cache_size": 427}
+{"t": 43.6349, "event": "sa.worker.done", "seed": 12346, "profile": "balanced", "feasible": true, "objective": 40804850.783492826, "iterations": 177}

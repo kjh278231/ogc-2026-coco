@@ -1,0 +1,17 @@
+[
+    {
+        "instance": "smoke_B3_b30_dense_geometry",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 1577302.22,
+            "time_seconds": 0.9096565246582031
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 364672.82,
+            "time_seconds": 4.909572124481201
+        }
+    }
+]

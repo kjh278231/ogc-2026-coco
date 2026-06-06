@@ -1,0 +1,1 @@
+{"pin": "win32 SetProcessAffinityMask FAILED for [0, 1, 2, 3]", "cores": [0, 1, 2, 3], "results": {"bench_B4_b70_dense_geometry": {"feasible": true, "stage": "5", "obj1": 102.0, "obj2": 378.3425101214576, "obj3": 943.0, "total_obj": 323171.7400809717, "wall_time": 55.23358988761902, "error": null}}}

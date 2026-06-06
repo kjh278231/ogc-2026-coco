@@ -1,0 +1,26 @@
+[
+  {
+    "instance": "bench_B4_b70_dense_geometry",
+    "algo": "athena",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 160.0,
+    "obj2": 114.69757555976582,
+    "obj3": 405.0,
+    "total": 486992.58060447813,
+    "wall": 18.414283514022827,
+    "error": null
+  },
+  {
+    "instance": "bench_B4_b90_crane_trap",
+    "algo": "athena",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 561.0,
+    "obj2": 270.31194875585106,
+    "obj3": 470.0,
+    "total": 1972171.871692535,
+    "wall": 18.405718326568604,
+    "error": null
+  }
+]

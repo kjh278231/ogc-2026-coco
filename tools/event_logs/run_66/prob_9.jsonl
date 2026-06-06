@@ -1,0 +1,14 @@
+{"t": 0.0, "event": "algo.start", "timelimit": 30.0}
+{"t": 0.001, "event": "algo.context", "n_blocks": 200, "n_bays": 3, "w1": 13333.0, "w2": 5.0, "w3": 150.0, "algo": "athena"}
+{"t": 0.1439, "event": "athena.features.done", "elapsed": 0.144}
+{"t": 0.1439, "event": "athena.time_plan", "tier": "short", "init_deadline": 9.0, "fallback_deadline": 13.5, "repair_deadline": 16.5, "sa_deadline": 27.6, "gather_deadline": 29.7}
+{"t": 0.1739, "event": "athena.init.emergency", "elapsed": 0.174, "feasible": true, "stage": "5", "objective": 501381498.28797567, "missing": 0}
+{"t": 0.1759, "event": "athena.smoothing.done", "elapsed": 0.176}
+{"t": 9.1123, "event": "athena.init.done", "elapsed": 9.112, "feasible": true, "stage": "5", "objective": 66305449.56666658, "n_forced": 33, "n_unplaced": 0}
+{"t": 13.5745, "event": "athena.init.fallback", "elapsed": 13.574, "feasible": true, "stage": "5", "objective": 100378338.09216341, "n_forced": 67, "n_unplaced": 0, "reason": "tardy_compare", "selected": false}
+{"t": 13.6453, "event": "sa.temperature.init", "T0": 8901.329479741778, "T_min": 8.90132947974178, "cooling": 0.998, "base_full_period": 100, "n_blocks": 200, "profile": "balanced", "move_probs": [0.42, 0.68, 0.31999999999999995]}
+{"t": 15.3189, "event": "sa.improvement", "iteration": 4, "move_type": "large", "objective": 53948156.04013314}
+{"t": 17.2531, "event": "sa.improvement", "iteration": 5, "move_type": "large", "objective": 53168455.968391225}
+{"t": 19.0985, "event": "sa.improvement", "iteration": 6, "move_type": "large", "objective": 53015366.172447324}
+{"t": 27.6191, "event": "sa.complete", "iterations": 15, "improvements": 3, "accepts": 4, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 6, "worse_limit_rejects": 0, "full_checks": 0, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 6, "best_objective": 53015366.172447324, "final_T": 8637.995946, "T0": 8901.329479741778, "pair_cache_size": 94, "crane_cache_size": 141}
+{"t": 27.6191, "event": "algo.end", "best_objective": 53015366.172447324, "wall_time": 27.619, "has_solution": true, "sa_iterations": 15, "sa_improvements": 3}

@@ -1,0 +1,10 @@
+{"t": 0.1522, "event": "sa.worker.start", "seed": 140832, "profile": "local_position"}
+{"t": 0.2492, "event": "sa.temperature.init", "T0": 31155.821507798657, "T_min": 31.155821507798656, "cooling": 0.999, "base_full_period": 100, "n_blocks": 300, "profile": "local_position", "move_probs": [0.55, 0.78, 0.21999999999999997]}
+{"t": 7.9886, "event": "sa.improvement", "iteration": 4, "move_type": "large", "objective": 123356703.54909553}
+{"t": 89.645, "event": "sa.complete", "iterations": 107, "improvements": 1, "accepts": 11, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 66, "worse_limit_rejects": 0, "full_checks": 0, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 4, "best_objective": 123356703.54909553, "final_T": 27992.806833, "T0": 31155.821507798657, "pair_cache_size": 350, "crane_cache_size": 544}
+{"t": 89.645, "event": "sa.worker.done", "seed": 140832, "profile": "local_position", "feasible": true, "objective": 123356703.54909553, "iterations": 107}
+{"t": 0.175, "event": "sa.worker.start", "seed": 245561, "profile": "local_position"}
+{"t": 0.2703, "event": "sa.temperature.init", "T0": 18693.492904679195, "T_min": 18.693492904679196, "cooling": 0.999, "base_full_period": 100, "n_blocks": 300, "profile": "local_position", "move_probs": [0.55, 0.78, 0.21999999999999997]}
+{"t": 11.2645, "event": "sa.full_check.best", "iteration": 12, "move_type": "small_entry_shift", "objective": 122372671.2168046, "fast_obj": 122372671.2168046}
+{"t": 89.623, "event": "sa.complete", "iterations": 128, "improvements": 1, "accepts": 21, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 77, "worse_limit_rejects": 0, "full_checks": 1, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 12, "best_objective": 122372671.2168046, "final_T": 16446.47959, "T0": 18693.492904679195, "pair_cache_size": 486, "crane_cache_size": 784}
+{"t": 89.624, "event": "sa.worker.done", "seed": 245561, "profile": "local_position", "feasible": true, "objective": 122372671.2168046, "iterations": 128}

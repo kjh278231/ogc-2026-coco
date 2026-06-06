@@ -1,0 +1,1 @@
+{"pin": "win32 SetProcessAffinityMask FAILED for [8, 9, 10, 11]", "cores": [8, 9, 10, 11], "results": {"prob_17": {"feasible": true, "stage": "5", "obj1": 5625.0, "obj2": 9416.139947163516, "obj3": 9680.0, "total_obj": 55870729.55978865, "wall_time": 55.43588852882385, "error": null}}}

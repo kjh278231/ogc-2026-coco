@@ -935,18 +935,21 @@ def check_feasibility(prob_info: dict, solution: dict) -> dict:
 
     -- Stage 2: crane entry feasibility ----------------------------------------
     For each block's ENTRY event at time entry_time, check_entry is called with
-    the set of blocks whose time intervals overlap entry_time:
-      present_at_entry = { b : b.entry_time <= entry_time < b.exit_time }
-    (Blocks whose exit_time equals entry_time have already left and are excluded
-    by the strict upper bound.)
+    the set of blocks that were already present in the bay before this block
+    arrives (strictly earlier entry, not yet departed):
+      present_at_entry = { b : b.entry_time < entry_time < b.exit_time }
+    Blocks entering at the same time are excluded -- their relative ordering
+    within the same time point is validated by Stage 5.
 
     -- Stage 3: crane exit feasibility -----------------------------------------
     For each block's EXIT event at time exit_time, check_exit is called with
-    the set of blocks whose time intervals strictly span exit_time:
+    the set of blocks that were already present in the bay before this block
+    begins its ascent (strictly earlier entry, not yet departed):
       present_at_exit = { b : b.entry_time < exit_time < b.exit_time }
       | { target_block itself }
-    (The target block is always included; check_exit internally skips it.
-    Blocks whose entry_time equals exit_time have not yet arrived.)
+    Blocks entering or exiting at the same time are excluded -- their relative
+    ordering within the same time point is validated by Stage 5.
+    (The target block is always included; check_exit internally skips it.)
 
     -- Stage 4: spatial collision and boundary ----------------------------------
     For every pair of blocks (in the same bay) whose time intervals overlap,
@@ -1158,13 +1161,15 @@ def check_feasibility(prob_info: dict, solution: dict) -> dict:
         return a1 < e2 and a2 < e1
 
     # -- Stage 2: crane entry feasibility at entry_time ----------------------
-    # For each block, collect the blocks that are present in the same bay at
-    # the exact moment the crane lowers the new block in.  The condition is:
-    #   a_k <= ai < e_k
+    # For each block, collect the blocks that were already present in the same
+    # bay before the new block arrives.  The condition is:
+    #   a_k < ai < e_k
     # where ai is entry_time of the new block, a_k and e_k are entry/exit of
-    # an existing block k.  Using strict upper bound (< e_k) correctly excludes
-    # blocks that depart at exactly the same time the new block arrives -- those
-    # have already been removed by the crane before this insertion begins.
+    # an existing block k.  Both bounds are strict:
+    #   * a_k < ai  : excludes blocks entering at the same time as the new
+    #                 block -- their relative ordering is handled by Stage 5.
+    #   * ai < e_k  : excludes blocks departing at exactly ai -- those have
+    #                 already been removed by the crane before this insertion.
     for j in range(n_bays):
         bay = Bay.from_dict(bays_data[j], j)
         for idx, a in enumerate(bay_asgns[j]):
@@ -1174,7 +1179,7 @@ def check_feasibility(prob_info: dict, solution: dict) -> dict:
                 bay_blocks[j][k]
                 for k, other in enumerate(bay_asgns[j])
                 if k != idx
-                and other["entry_time"] <= ai < other["exit_time"]
+                and other["entry_time"] < ai < other["exit_time"]
             ]
             obs = check_entry(bay, present, new_blk)
             if obs:
@@ -1198,11 +1203,15 @@ def check_feasibility(prob_info: dict, solution: dict) -> dict:
                 "objective": None, "obj1": None, "obj2": None, "obj3": None}
 
     # -- Stage 3: crane exit feasibility at exit_time ------------------------
-    # For each block, collect the blocks co-present in the bay at the moment the
-    # crane starts lifting it out.  The condition is:
+    # For each block, collect the blocks that were already present in the same
+    # bay before the target block begins its ascent.  The condition is:
     #   a_k < ei < e_k   (strictly between, both ends excluded)
-    # Using strict lower bound (a_k < ei) correctly excludes blocks whose entry
-    # equals ei -- those have not yet been lowered into the bay at this instant.
+    # Both bounds are strict:
+    #   * a_k < ei  : excludes blocks entering at exactly ei -- those have not
+    #                 yet arrived, and their ordering relative to this EXIT is
+    #                 handled by Stage 5.
+    #   * ei < e_k  : excludes blocks departing at exactly ei -- their relative
+    #                 ordering with this EXIT is handled by Stage 5.
     # The target block itself is always included in present_at_exit so that
     # check_exit can skip it by block_id; callers do not pre-filter it out.
     for j in range(n_bays):
@@ -1410,11 +1419,11 @@ def check_feasibility(prob_info: dict, solution: dict) -> dict:
     avg_area  = sum(bay_areas) / n_bays
     u = [avg_area / a for a in bay_areas]
     if n_bays >= 2:
-        obj2 = max(
+        obj2 = math.floor(max(
             abs(u[j1] * bay_loads[j1] - u[j2] * bay_loads[j2])
             for j1 in range(n_bays) for j2 in range(n_bays)
             if j1 != j2
-        )
+        ))
     else:
         obj2 = 0.0
 

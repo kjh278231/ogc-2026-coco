@@ -1,0 +1,11 @@
+{"t": 0.0, "event": "algo.start", "timelimit": 60.0}
+{"t": 0.1275, "event": "algo.context", "n_blocks": 300, "n_bays": 4, "w1": 9697, "w2": 4, "w3": 133}
+{"t": 0.1326, "event": "init.start", "target_heuristics": ["EDD", "SlackRatio", "MST", "LargestArea"], "init_check_limit": 4.5}
+{"t": 4.6797, "event": "init.heuristic_result", "name": "EDD", "feasible": false, "stage": 2, "objective": null, "wall_time": 4.5471}
+{"t": 9.2344, "event": "init.heuristic_result", "name": "SlackRatio", "feasible": false, "stage": 2, "objective": null, "wall_time": 4.5547}
+{"t": 13.7687, "event": "init.heuristic_result", "name": "MST", "feasible": false, "stage": 2, "objective": null, "wall_time": 4.5343}
+{"t": 18.2976, "event": "init.heuristic_result", "name": "LargestArea", "feasible": false, "stage": 2, "objective": null, "wall_time": 4.5289}
+{"t": 18.2976, "event": "init.fallback", "path": "forced_direct", "reason": "all_seeds_infeasible"}
+{"t": 18.3209, "event": "init.fallback.outcome", "path": "forced_direct", "feasible": false, "objective": null}
+{"t": 54.0423, "event": "sa.complete", "iterations": 12, "improvements": 0, "best_objective": Infinity}
+{"t": 54.0423, "event": "algo.end", "best_objective": Infinity, "wall_time": 54.0423, "has_solution": true}

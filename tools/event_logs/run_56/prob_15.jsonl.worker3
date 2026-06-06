@@ -1,0 +1,4 @@
+{"t": 0.3261, "event": "sa.worker.start", "seed": 36103, "profile": "local_position"}
+{"t": 0.52, "event": "sa.temperature.init", "T0": 0.7, "T_min": 0.0007, "cooling": 0.999, "base_full_period": 100, "n_blocks": 250, "profile": "local_position", "move_probs": [0.55, 0.78, 0.21999999999999997]}
+{"t": 21.3452, "event": "sa.complete", "iterations": 6, "improvements": 0, "accepts": 1, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 2, "worse_limit_rejects": 0, "full_checks": 0, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 0, "best_objective": 44817583.3027573, "final_T": 0.69581, "T0": 0.7, "pair_cache_size": 82, "crane_cache_size": 114}
+{"t": 21.3462, "event": "sa.worker.done", "seed": 36103, "profile": "local_position", "feasible": true, "objective": 44817583.3027573, "iterations": 6}

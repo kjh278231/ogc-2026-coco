@@ -1,0 +1,10 @@
+{"t": 0.0, "event": "algo.start", "timelimit": 5.0}
+{"t": 0.022, "event": "algo.context", "n_blocks": 30, "n_bays": 3, "w1": 3000, "w2": 8, "w3": 15}
+{"t": 0.023, "event": "init.start", "target_heuristics": ["EDD", "SlackRatio", "MST", "LargestArea"], "init_check_limit": 0.5}
+{"t": 0.5268, "event": "init.heuristic_result", "name": "EDD", "feasible": false, "stage": 2, "objective": null, "wall_time": 0.5028}
+{"t": 1.0342, "event": "init.heuristic_result", "name": "SlackRatio", "feasible": true, "stage": 5, "objective": 1246866.475696828, "wall_time": 0.5073}
+{"t": 1.5365, "event": "init.heuristic_result", "name": "MST", "feasible": false, "stage": 2, "objective": null, "wall_time": 0.5023}
+{"t": 2.0394, "event": "init.heuristic_result", "name": "LargestArea", "feasible": false, "stage": 2, "objective": null, "wall_time": 0.5029}
+{"t": 2.0394, "event": "init.chosen", "name": "SlackRatio", "objective": 1246866.475696828}
+{"t": 4.5004, "event": "sa.complete", "iterations": 2, "improvements": 0, "best_objective": 1246866.475696828}
+{"t": 4.5004, "event": "algo.end", "best_objective": 1246866.475696828, "wall_time": 4.5004, "has_solution": true}

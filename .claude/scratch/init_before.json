@@ -1,0 +1,84 @@
+{
+  "bench_B3_b30_balanced.json": {
+    "bays": 3,
+    "blocks": 30,
+    "feasible": true,
+    "stage": "5",
+    "objective": 173468.75491493833,
+    "n_forced": 0,
+    "place_s": 0.2763
+  },
+  "bench_B3_b50_tight_due.json": {
+    "bays": 3,
+    "blocks": 50,
+    "feasible": true,
+    "stage": "5",
+    "objective": 1568910.5645527353,
+    "n_forced": 0,
+    "place_s": 0.7809
+  },
+  "bench_B4_b70_dense_geometry.json": {
+    "bays": 4,
+    "blocks": 70,
+    "feasible": true,
+    "stage": "5",
+    "objective": 851935.0518218623,
+    "n_forced": 0,
+    "place_s": 1.0447
+  },
+  "bench_B4_b90_crane_trap.json": {
+    "bays": 4,
+    "blocks": 90,
+    "feasible": true,
+    "stage": "5",
+    "objective": 2006372.0414438504,
+    "n_forced": 0,
+    "place_s": 1.7159
+  },
+  "bench_B5_b120_preference_skew.json": {
+    "bays": 5,
+    "blocks": 120,
+    "feasible": true,
+    "stage": "5",
+    "objective": 1057836.9245923914,
+    "n_forced": 0,
+    "place_s": 2.3694
+  },
+  "bench_B5_b150_mixed_hard.json": {
+    "bays": 5,
+    "blocks": 150,
+    "feasible": true,
+    "stage": "5",
+    "objective": 4560843.939874387,
+    "n_forced": 0,
+    "place_s": 4.1739
+  },
+  "my_B5_b200_hard.json": {
+    "bays": 5,
+    "blocks": 200,
+    "feasible": true,
+    "stage": "5",
+    "objective": 11710324.007266475,
+    "n_forced": 0,
+    "place_s": 7.4168
+  },
+  "smoke_B3_b20_balanced.json": {
+    "bays": 3,
+    "blocks": 20,
+    "feasible": true,
+    "stage": "5",
+    "objective": 113259.93357694108,
+    "n_forced": 0,
+    "place_s": 0.0811
+  },
+  "smoke_B3_b30_dense_geometry.json": {
+    "bays": 3,
+    "blocks": 30,
+    "feasible": true,
+    "stage": "5",
+    "objective": 235444.92424976022,
+    "n_forced": 0,
+    "place_s": 0.2779
+  },
+  "_elapsed": 18.83
+}

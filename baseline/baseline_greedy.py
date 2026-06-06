@@ -214,7 +214,7 @@ def _find_earliest_slot(new_blk: Block,
       spatial collision check is run for these blocks to avoid producing
       Stage-4 violations that the repair loop cannot detect at placement time.
     """
-    candidate_entries = sorted({r_time} | {e for _, e in schedule_in_bay})
+    candidate_entries = sorted({r_time} | {e for _, e in schedule_in_bay if e > r_time})
 
     for entry_candidate in candidate_entries:
         entry  = max(r_time, entry_candidate)
@@ -586,8 +586,12 @@ def _place_blocks(
                     if bw > bay.width + 1e-6 or bh > bay.height + 1e-6:
                         continue
 
+                    active_in_bay = [
+                        b for b, (a_k, e_k) in zip(placed_in_bay, schedule_in_bay)
+                        if e_k > r_time
+                    ]
                     candidates = _candidate_positions(
-                        bay.width, bay.height, placed_in_bay, blk_bb
+                        bay.width, bay.height, active_in_bay, blk_bb
                     )
                     for (cx, cy) in candidates:
                         new_blk = Block(block_id=bi, block_data=blk_data,

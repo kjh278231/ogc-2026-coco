@@ -1,0 +1,1 @@
+{"pin": "win32 SetProcessAffinityMask FAILED for [0, 1, 2, 3]", "cores": [0, 1, 2, 3], "results": {"smoke_B3_b20_balanced": {"feasible": true, "stage": "5", "obj1": 0.0, "obj2": 25.906825337048986, "obj3": 30.0, "total_obj": 781.3477773593429, "wall_time": 27.608307123184204, "error": null}}}

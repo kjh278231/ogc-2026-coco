@@ -1,0 +1,6 @@
+{"t": 0.384, "event": "sa.worker.start", "seed": 36103, "profile": "tardy_lite_repair"}
+{"t": 0.5485, "event": "sa.temperature.init", "T0": 4747.553753569319, "T_min": 4.74755375356932, "cooling": 0.999, "base_full_period": 100, "n_blocks": 250, "profile": "tardy_lite_repair", "move_probs": [0.45, 0.55, 0.44999999999999996], "large_mode": "lite"}
+{"t": 1.4026, "event": "sa.improvement", "iteration": 2, "move_type": "large_lite", "objective": 12143912.116102332}
+{"t": 7.3509, "event": "sa.improvement", "iteration": 10, "move_type": "large_lite", "objective": 12139965.257617183}
+{"t": 21.0453, "event": "sa.complete", "iterations": 44, "improvements": 2, "accepts": 16, "worse_accepts": 1, "worse_z1_accepts": 0, "fast_rejects": 20, "worse_limit_rejects": 0, "full_checks": 0, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 10, "best_objective": 12139965.257617183, "final_T": 4543.090337, "T0": 4747.553753569319, "pair_cache_size": 124, "crane_cache_size": 169}
+{"t": 21.0453, "event": "sa.worker.done", "seed": 36103, "profile": "tardy_lite_repair", "feasible": true, "objective": 12139965.257617183, "iterations": 44}

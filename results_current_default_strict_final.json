@@ -1,0 +1,137 @@
+[
+    {
+        "instance": "bench_B3_b30_balanced",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 2246.31,
+            "time_seconds": 4.1934027671813965
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 3188.65,
+            "time_seconds": 54.00016188621521
+        }
+    },
+    {
+        "instance": "bench_B3_b50_tight_due",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 2331855.8,
+            "time_seconds": 9.036776542663574
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 3630.56,
+            "time_seconds": 54.00095891952515
+        }
+    },
+    {
+        "instance": "bench_B4_b70_dense_geometry",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 4575100.06,
+            "time_seconds": 9.034115076065063
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 165003.72,
+            "time_seconds": 58.816054582595825
+        }
+    },
+    {
+        "instance": "bench_B4_b90_crane_trap",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 13721493.89,
+            "time_seconds": 9.048338174819946
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 30203607.35,
+            "time_seconds": 59.51724648475647
+        }
+    },
+    {
+        "instance": "bench_B5_b120_preference_skew",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 6877450.89,
+            "time_seconds": 9.043495416641235
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 14325850.89,
+            "time_seconds": 59.52254295349121
+        }
+    },
+    {
+        "instance": "bench_B5_b150_mixed_hard",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 20915027.83,
+            "time_seconds": 9.038883686065674
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 32619532.87,
+            "time_seconds": 59.52889013290405
+        }
+    },
+    {
+        "instance": "my_B5_b200_hard",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 81262017.14,
+            "time_seconds": 9.066585302352905
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 114784887.91,
+            "time_seconds": 59.54681992530823
+        }
+    },
+    {
+        "instance": "smoke_B3_b20_balanced",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 1566.18,
+            "time_seconds": 0.7164208889007568
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 860.34,
+            "time_seconds": 54.00108242034912
+        }
+    },
+    {
+        "instance": "smoke_B3_b30_dense_geometry",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 47005.36,
+            "time_seconds": 5.150851011276245
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 4335.07,
+            "time_seconds": 54.000388622283936
+        }
+    }
+]

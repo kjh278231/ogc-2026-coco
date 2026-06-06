@@ -1,0 +1,32 @@
+[
+    {
+        "instance": "smoke_B3_b20_balanced",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 1566.18,
+            "time_seconds": 0.6640980243682861
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 959.76,
+            "time_seconds": 18.48878788948059
+        }
+    },
+    {
+        "instance": "smoke_B3_b30_dense_geometry",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 67820.31,
+            "time_seconds": 4.62182092666626
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 3884.13,
+            "time_seconds": 21.34969735145569
+        }
+    }
+]

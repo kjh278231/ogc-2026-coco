@@ -1,0 +1,61 @@
+=== [1/2] Step0 eval (working tree = 1-A+1-C) ===
+[parallel_eval] run_id=9 sha=7acdeb67 (dirty) files=9 workers=6 cores/worker=4 timelimit=60.0s db=C:\Users\ADMIN\Workspace\ogc2026\tools\ogc2026_runs.db
+[parallel_eval] worker 0: 2 instances -> cores [0, 1, 2, 3]
+[parallel_eval] worker 1: 2 instances -> cores [4, 5, 6, 7]
+[parallel_eval] worker 2: 2 instances -> cores [8, 9, 10, 11]
+[parallel_eval] worker 3: 1 instances -> cores [12, 13, 14, 15]
+[parallel_eval] worker 4: 1 instances -> cores [16, 17, 18, 19]
+[parallel_eval] worker 5: 1 instances -> cores [20, 21, 22, 23]
+[parallel_eval]   bench_B3_b30_balanced: ok  obj=1424.77 t=55.23s
+[parallel_eval]   my_B5_b200_hard: ok  obj=10559498.81 t=55.36s
+[parallel_eval]   bench_B3_b50_tight_due: ok  obj=1057858.97 t=55.29s
+[parallel_eval]   smoke_B3_b20_balanced: ok  obj=720.16 t=55.22s
+[parallel_eval]   bench_B4_b70_dense_geometry: ok  obj=598153.36 t=55.27s
+[parallel_eval]   smoke_B3_b30_dense_geometry: ok  obj=28330.30 t=55.23s
+[parallel_eval]   bench_B4_b90_crane_trap: ok  obj=2407645.60 t=55.29s
+[parallel_eval]   bench_B5_b120_preference_skew: ok  obj=960581.61 t=55.33s
+[parallel_eval]   bench_B5_b150_mixed_hard: ok  obj=3873342.92 t=55.35s
+[parallel_eval] done. run_id=9 instances=9 feasible=9/9 wall=112.6s (vs ~540s serial upper bound)
+step0 exit=0
+=== stashing baseline/my_new_algorithm.py to recover pre-Step0 baseline ===
+warning: in the working copy of 'baseline/my_new_algorithm.py', LF will be replaced by CRLF the next time Git touches it
+Saved working directory and index state On feature/my-algorithm: step0-ab-temp
+warning: in the working copy of 'baseline/my_new_algorithm.py', LF will be replaced by CRLF the next time Git touches it
+--- solver now at committed baseline; git status: ---
+=== [2/2] baseline eval (committed solver) ===
+[parallel_eval] run_id=10 sha=7acdeb67 (dirty) files=9 workers=6 cores/worker=4 timelimit=60.0s db=C:\Users\ADMIN\Workspace\ogc2026\tools\ogc2026_runs.db
+[parallel_eval] worker 0: 2 instances -> cores [0, 1, 2, 3]
+[parallel_eval] worker 1: 2 instances -> cores [4, 5, 6, 7]
+[parallel_eval] worker 2: 2 instances -> cores [8, 9, 10, 11]
+[parallel_eval] worker 3: 1 instances -> cores [12, 13, 14, 15]
+[parallel_eval] worker 4: 1 instances -> cores [16, 17, 18, 19]
+[parallel_eval] worker 5: 1 instances -> cores [20, 21, 22, 23]
+[parallel_eval]   bench_B3_b30_balanced: ok  obj=729.03 t=55.23s
+[parallel_eval]   my_B5_b200_hard: ok  obj=11708925.33 t=55.32s
+[parallel_eval]   bench_B3_b50_tight_due: ok  obj=1178800.43 t=55.26s
+[parallel_eval]   smoke_B3_b20_balanced: ok  obj=829.23 t=55.21s
+[parallel_eval]   bench_B4_b70_dense_geometry: ok  obj=676391.68 t=55.28s
+[parallel_eval]   smoke_B3_b30_dense_geometry: ok  obj=16473.91 t=55.23s
+[parallel_eval]   bench_B4_b90_crane_trap: ok  obj=1946872.04 t=55.31s
+[parallel_eval]   bench_B5_b120_preference_skew: ok  obj=987869.45 t=55.35s
+[parallel_eval]   bench_B5_b150_mixed_hard: ok  obj=4550175.94 t=55.36s
+[parallel_eval] done. run_id=10 instances=9 feasible=9/9 wall=112.6s (vs ~540s serial upper bound)
+baseline exit=0
+=== A/B DONE ===
+=== [restore] git stash pop ===
+On branch feature/my-algorithm
+Your branch is ahead of 'origin/feature/my-algorithm' by 5 commits.
+  (use "git push" to publish your local commits)
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   .claude/agents/README.md
+	modified:   .claude/agents/approval-gate.md
+	modified:   .claude/agents/eval-analyst.md
+	modified:   .claude/agents/improvement-strategist.md
+	modified:   .claude/agents/solver-developer.md
+	modified:   baseline/my_new_algorithm.py
+
+no changes added to commit (use "git add" and/or "git commit -a")
+Dropped refs/stash@{0} (4a26ea535400731a72c927a62735a7e98c88d98f)

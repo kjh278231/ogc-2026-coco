@@ -1,0 +1,10 @@
+{"t": 0.0, "event": "algo.start", "timelimit": 10.0}
+{"t": 0.0, "event": "algo.context", "n_blocks": 250, "n_bays": 4, "w1": 18605.0, "w2": 5.0, "w3": 133.0, "algo": "athena"}
+{"t": 0.1703, "event": "athena.features.done", "elapsed": 0.17}
+{"t": 0.1733, "event": "athena.smoothing.done", "elapsed": 0.173}
+{"t": 4.6057, "event": "athena.init.done", "elapsed": 4.606, "feasible": true, "stage": "5", "objective": 208120382.68752727, "n_forced": 97, "n_unplaced": 0}
+{"t": 5.5746, "event": "athena.init.fallback", "elapsed": 5.575, "feasible": true, "stage": "5", "objective": 485349367.78314567, "n_forced": 171, "n_unplaced": 0, "reason": "tardy_compare", "selected": false}
+{"t": 5.6242, "event": "sa.temperature.init", "T0": 1.0, "T_min": 0.001, "cooling": 0.998, "base_full_period": 100, "n_blocks": 250, "profile": "balanced", "move_probs": [0.42, 0.68, 0.31999999999999995]}
+{"t": 8.1586, "event": "sa.improvement", "iteration": 4, "move_type": "large", "objective": 141406017.85662645}
+{"t": 9.227, "event": "sa.complete", "iterations": 5, "improvements": 1, "accepts": 1, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 3, "worse_limit_rejects": 0, "full_checks": 0, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 4, "best_objective": 141406017.85662645, "final_T": 0.99004, "T0": 1.0, "pair_cache_size": 68, "crane_cache_size": 89}
+{"t": 9.2275, "event": "algo.end", "best_objective": 141406017.85662645, "wall_time": 9.228, "has_solution": true, "sa_iterations": 5, "sa_improvements": 1}

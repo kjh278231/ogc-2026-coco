@@ -1,0 +1,12 @@
+{"t": 0.0, "event": "algo.start", "timelimit": 60.0}
+{"t": 0.015, "event": "algo.context", "n_blocks": 30, "n_bays": 3, "w1": 2667, "w2": 7, "w3": 20}
+{"t": 0.016, "event": "init.start", "target_heuristics": ["EDD", "SlackRatio", "MST", "LargestArea"], "init_check_limit": 4.5}
+{"t": 4.5316, "event": "init.heuristic_result", "name": "EDD", "feasible": true, "stage": 5, "objective": 21348.37750437628, "wall_time": 4.5156}
+{"t": 9.036, "event": "init.heuristic_result", "name": "SlackRatio", "feasible": false, "stage": 2, "objective": null, "wall_time": 4.5044}
+{"t": 13.152, "event": "init.heuristic_result", "name": "MST", "feasible": true, "stage": 5, "objective": 3733.8102965027238, "wall_time": 4.1161}
+{"t": 16.4495, "event": "init.heuristic_result", "name": "LargestArea", "feasible": true, "stage": 5, "objective": 3325.6327584042583, "wall_time": 3.2965}
+{"t": 16.4495, "event": "init.chosen", "name": "LargestArea", "objective": 3325.6327584042583}
+{"t": 28.4802, "event": "sa.improvement", "iteration": 4, "move_type": "swap", "objective": 2955.7490518139616}
+{"t": 34.507, "event": "sa.improvement", "iteration": 6, "move_type": "insert", "objective": 2362.0252836980203}
+{"t": 54.0047, "event": "sa.complete", "iterations": 13, "improvements": 2, "best_objective": 2362.0252836980203}
+{"t": 54.0057, "event": "algo.end", "best_objective": 2362.0252836980203, "wall_time": 54.0057, "has_solution": true}

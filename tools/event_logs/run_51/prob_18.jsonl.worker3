@@ -1,0 +1,14 @@
+{"t": 0.3835, "event": "sa.worker.start", "seed": 36103, "profile": "tardy_lite_repair"}
+{"t": 0.5847, "event": "sa.temperature.init", "T0": 17802.658959483557, "T_min": 17.80265895948356, "cooling": 0.999, "base_full_period": 100, "n_blocks": 300, "profile": "tardy_lite_repair", "move_probs": [0.45, 0.55, 0.44999999999999996], "large_mode": "lite"}
+{"t": 1.5087, "event": "sa.improvement", "iteration": 1, "move_type": "large_lite", "objective": 96199416.10021965}
+{"t": 2.5486, "event": "sa.improvement", "iteration": 2, "move_type": "large_lite", "objective": 93165903.13761964}
+{"t": 3.7304, "event": "sa.improvement", "iteration": 3, "move_type": "large_lite", "objective": 89922559.13761964}
+{"t": 5.1179, "event": "sa.improvement", "iteration": 5, "move_type": "large_lite", "objective": 88423521.50326224}
+{"t": 6.5422, "event": "sa.improvement", "iteration": 6, "move_type": "large_lite", "objective": 87924428.51216544}
+{"t": 7.7328, "event": "sa.improvement", "iteration": 9, "move_type": "large_lite", "objective": 87388679.24311458}
+{"t": 8.9413, "event": "sa.improvement", "iteration": 12, "move_type": "large_lite", "objective": 86821670.68466839}
+{"t": 10.2393, "event": "sa.improvement", "iteration": 13, "move_type": "large_lite", "objective": 86586512.22232865}
+{"t": 11.4555, "event": "sa.improvement", "iteration": 20, "move_type": "large_lite", "objective": 86390609.50651477}
+{"t": 14.1309, "event": "sa.improvement", "iteration": 23, "move_type": "large_lite", "objective": 86101720.75918761}
+{"t": 20.7585, "event": "sa.complete", "iterations": 38, "improvements": 10, "accepts": 15, "worse_accepts": 1, "worse_z1_accepts": 0, "fast_rejects": 17, "worse_limit_rejects": 0, "full_checks": 0, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 23, "best_objective": 86101720.75918761, "final_T": 17138.52431, "T0": 17802.658959483557, "pair_cache_size": 129, "crane_cache_size": 184}
+{"t": 20.7598, "event": "sa.worker.done", "seed": 36103, "profile": "tardy_lite_repair", "feasible": true, "objective": 86101720.75918761, "iterations": 38}

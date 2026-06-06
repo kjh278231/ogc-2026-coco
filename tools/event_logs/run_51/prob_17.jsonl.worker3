@@ -1,0 +1,15 @@
+{"t": 0.3305, "event": "sa.worker.start", "seed": 36103, "profile": "tardy_lite_repair"}
+{"t": 0.516, "event": "sa.temperature.init", "T0": 12947.752488570619, "T_min": 12.94775248857062, "cooling": 0.999, "base_full_period": 100, "n_blocks": 300, "profile": "tardy_lite_repair", "move_probs": [0.45, 0.55, 0.44999999999999996], "large_mode": "lite"}
+{"t": 1.5212, "event": "sa.improvement", "iteration": 1, "move_type": "large_lite", "objective": 69853561.29367949}
+{"t": 2.6657, "event": "sa.improvement", "iteration": 2, "move_type": "large_lite", "objective": 65799623.896511994}
+{"t": 3.8514, "event": "sa.improvement", "iteration": 3, "move_type": "large_lite", "objective": 61341371.068647705}
+{"t": 5.3152, "event": "sa.improvement", "iteration": 5, "move_type": "large_lite", "objective": 60201156.43190847}
+{"t": 6.6193, "event": "sa.improvement", "iteration": 6, "move_type": "large_lite", "objective": 58407796.278682664}
+{"t": 7.9725, "event": "sa.improvement", "iteration": 9, "move_type": "large_lite", "objective": 58222715.21406722}
+{"t": 12.2909, "event": "sa.improvement", "iteration": 15, "move_type": "large_lite", "objective": 58118332.23716828}
+{"t": 12.2909, "event": "sa.accept.worse_tardiness", "iteration": 16, "T": 12754.8898, "curr_obj": 58118332.23716828, "new_obj": 58128029.23716828, "delta_obj": 9697.0, "delta_tardiness": 1.0, "accept_prob": 0.102205, "changed_blocks": [163], "move_type": "small_entry_shift"}
+{"t": 15.0303, "event": "sa.improvement", "iteration": 19, "move_type": "large_lite", "objective": 58098938.23716828}
+{"t": 16.1821, "event": "sa.improvement", "iteration": 29, "move_type": "large_lite", "objective": 58027948.567833304}
+{"t": 18.5801, "event": "sa.improvement", "iteration": 36, "move_type": "large_lite", "objective": 57966636.88679882}
+{"t": 20.6636, "event": "sa.complete", "iterations": 42, "improvements": 10, "accepts": 16, "worse_accepts": 2, "worse_z1_accepts": 1, "fast_rejects": 19, "worse_limit_rejects": 0, "full_checks": 0, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 36, "best_objective": 57966636.88679882, "final_T": 12414.947697, "T0": 12947.752488570619, "pair_cache_size": 113, "crane_cache_size": 151}
+{"t": 20.6636, "event": "sa.worker.done", "seed": 36103, "profile": "tardy_lite_repair", "feasible": true, "objective": 57966636.88679882, "iterations": 42}

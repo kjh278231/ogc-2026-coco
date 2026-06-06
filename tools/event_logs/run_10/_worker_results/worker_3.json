@@ -1,0 +1,1 @@
+{"pin": "win32 SetProcessAffinityMask FAILED for [12, 13, 14, 15]", "cores": [12, 13, 14, 15], "results": {"bench_B4_b90_crane_trap": {"feasible": true, "stage": "5", "obj1": 554.0, "obj2": 144.506907308378, "obj3": 467.0, "total_obj": 1946872.0414438504, "wall_time": 55.31332993507385, "error": null}}}

@@ -1,0 +1,74 @@
+[
+  {
+    "instance": "smoke_B3_b20_balanced",
+    "algo": "hermes",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 0.0,
+    "obj2": 58.75152368757995,
+    "obj3": 54.0,
+    "total": 1491.2606658130596,
+    "wall": 18.00002956390381,
+    "error": null
+  },
+  {
+    "instance": "smoke_B3_b20_balanced",
+    "algo": "greedy",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 0.0,
+    "obj2": 95.16891351709768,
+    "obj3": 45.0,
+    "total": 1566.1823946196837,
+    "wall": 1.7598440647125244,
+    "error": null
+  },
+  {
+    "instance": "smoke_B3_b20_balanced",
+    "algo": "athena",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 0.0,
+    "obj2": 15.657713592343157,
+    "obj3": 32.0,
+    "total": 749.6039951464021,
+    "wall": 18.40114450454712,
+    "error": null
+  },
+  {
+    "instance": "smoke_B3_b30_dense_geometry",
+    "algo": "hermes",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 206.0,
+    "obj2": 329.0274789982675,
+    "obj3": 178.0,
+    "total": 623302.2198319861,
+    "wall": 18.00097966194153,
+    "error": null
+  },
+  {
+    "instance": "smoke_B3_b30_dense_geometry",
+    "algo": "greedy",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 14.0,
+    "obj2": 6.919685159131632,
+    "obj3": 330.0,
+    "total": 47005.35748127305,
+    "wall": 11.476877450942993,
+    "error": null
+  },
+  {
+    "instance": "smoke_B3_b30_dense_geometry",
+    "algo": "athena",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 23.0,
+    "obj2": 158.11553122002948,
+    "obj3": 212.0,
+    "total": 73444.92424976024,
+    "wall": 18.411067962646484,
+    "error": null
+  }
+]

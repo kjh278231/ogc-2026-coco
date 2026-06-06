@@ -1,0 +1,11 @@
+{"t": 0.001, "event": "algo.start", "timelimit": 20.0}
+{"t": 0.001, "event": "algo.context", "n_blocks": 200, "n_bays": 3, "w1": 13333.0, "w2": 5.0, "w3": 150.0, "algo": "athena"}
+{"t": 0.2781, "event": "athena.features.done", "elapsed": 0.278}
+{"t": 0.2781, "event": "athena.time_plan", "tier": "short", "init_deadline": 6.0, "fallback_deadline": 9.0, "repair_deadline": 11.0, "sa_deadline": 18.4, "gather_deadline": 19.8}
+{"t": 0.3723, "event": "athena.init.emergency", "elapsed": 0.372, "feasible": true, "stage": "5", "objective": 501381498.28797567, "missing": 0}
+{"t": 0.3763, "event": "athena.smoothing.done", "elapsed": 0.376}
+{"t": 6.1151, "event": "athena.init.done", "elapsed": 6.115, "feasible": true, "stage": "5", "objective": 144645595.24562487, "n_forced": 92, "n_unplaced": 0}
+{"t": 9.1084, "event": "athena.init.fallback", "elapsed": 9.108, "feasible": true, "stage": "5", "objective": 204227719.56115702, "n_forced": 117, "n_unplaced": 0, "reason": "tardy_compare", "selected": false}
+{"t": 9.1084, "event": "athena.parallel_sa.start", "n_workers": 4, "remaining": 9.292, "worker_deadline": 18.4, "gather_deadline": 19.8}
+{"t": 18.5292, "event": "athena.parallel_sa.done", "feasible": true, "objective": 61468467.526000634, "n_results": 4, "n_feasible": 4}
+{"t": 18.6697, "event": "algo.end", "best_objective": 61468467.526000634, "wall_time": 18.67, "has_solution": true, "sa_iterations": 0, "sa_improvements": 0}

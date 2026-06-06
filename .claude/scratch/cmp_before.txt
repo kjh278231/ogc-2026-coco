@@ -1,0 +1,4 @@
+BEFORE  n=9 feasible=9 errors=0 sum_obj=22278396.14 tot_forced=0 max_place_s=7.417
+  before bays=3: n=4 sum_obj=2091084.18
+  before bays=4: n=2 sum_obj=2858307.09
+  before bays=5: n=3 sum_obj=17329004.87

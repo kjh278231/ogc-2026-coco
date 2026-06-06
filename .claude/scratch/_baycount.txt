@@ -1,0 +1,2 @@
+total files: 9
+bay-count distribution {bays: nfiles}: {3: 4, 4: 2, 5: 3}

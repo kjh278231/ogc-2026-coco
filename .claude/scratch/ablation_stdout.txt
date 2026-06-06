@@ -1,0 +1,16 @@
+mode         feas          sum_obj  vs_baseline
+baseline        9      22278396.14      +0.000%
+cap_only        8       9875375.45     -55.673%
+weight_only     7       7526793.61     -66.215%
+both            9      20389089.30      -8.480%
+
+per-instance objective (baseline -> cap_only / weight_only / both):
+  bench_B3_b30_balanced.json             base=     173468.75  cap=   +8.2%  wgt=   -9.0%  both=   +7.7%
+  bench_B3_b50_tight_due.json            base=    1568910.56  cap=  -15.3%  wgt=   +9.2%  both=  -18.0%
+  bench_B4_b70_dense_geometry.json       base=     851935.05  cap=  -26.3%  wgt=  +10.9%  both=  -20.6%
+  bench_B4_b90_crane_trap.json           base=    2006372.04  cap=  +30.6%  wgt=  INFEAS  both=  +21.4%
+  bench_B5_b120_preference_skew.json     base=    1057836.92  cap=   -5.1%  wgt=   -4.1%  both=   -3.7%
+  bench_B5_b150_mixed_hard.json          base=    4560843.94  cap=  -17.6%  wgt=  -26.7%  both=  -15.0%
+  my_B5_b200_hard.json                   base=   11710324.01  cap=  INFEAS  wgt=  INFEAS  both=   -9.8%
+  smoke_B3_b20_balanced.json             base=     113259.93  cap=   +0.0%  wgt=   +0.2%  both=   +0.2%
+  smoke_B3_b30_dense_geometry.json       base=     235444.92  cap=   +0.6%  wgt=   +2.4%  both=   +0.5%

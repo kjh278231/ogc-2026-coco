@@ -1,0 +1,4 @@
+{"t": 0.0, "event": "algo.start", "timelimit": 60.0}
+{"t": 0.0, "event": "algo.context", "n_blocks": 70, "n_bays": 4, "w1": 3000.0, "w2": 8.0, "w3": 15.0, "algo": "athena"}
+{"t": 0.0706, "event": "athena.features.done", "elapsed": 0.071}
+{"t": 0.0716, "event": "athena.smoothing.done", "elapsed": 0.072}

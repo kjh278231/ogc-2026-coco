@@ -1,0 +1,38 @@
+[
+  {
+    "instance": "smoke_B3_b20_balanced",
+    "algo": "hermes",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 0.0,
+    "obj2": 44.88018565880458,
+    "obj3": 23.0,
+    "total": 774.1612996116321,
+    "wall": 13.500602722167969,
+    "error": null
+  },
+  {
+    "instance": "smoke_B3_b20_balanced",
+    "algo": "greedy",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 0.0,
+    "obj2": 95.16891351709768,
+    "obj3": 45.0,
+    "total": 1566.1823946196837,
+    "wall": 0.7022747993469238,
+    "error": null
+  },
+  {
+    "instance": "smoke_B3_b20_balanced",
+    "algo": "athena",
+    "feasible": true,
+    "stage": "5",
+    "obj1": 0.0,
+    "obj2": 104.63276931387765,
+    "obj3": 35.0,
+    "total": 1432.4293851971436,
+    "wall": 13.803500890731812,
+    "error": null
+  }
+]

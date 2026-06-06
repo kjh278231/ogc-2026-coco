@@ -1,0 +1,23 @@
+BEFORE  n=9 feasible=9 errors=0 sum_obj=22278396.14 tot_forced=0 max_place_s=7.417
+  before bays=3: n=4 sum_obj=2091084.18
+  before bays=4: n=2 sum_obj=2858307.09
+  before bays=5: n=3 sum_obj=17329004.87
+AFTER   n=9 feasible=9 errors=0 sum_obj=20389089.30 tot_forced=0 max_place_s=9.122
+  after  bays=3: n=4 sum_obj=1823599.99
+  after  bays=4: n=2 sum_obj=3111798.96
+  after  bays=5: n=3 sum_obj=15453690.35
+
+DELTA   feasible 9->9  sum_obj 22278396.14->20389089.30 (-1889306.84, -8.480%)  tot_forced 0->0
+
+per-instance objective changes:
+  bench_B3_b30_balanced.json: 173468.75 -> 186875.50 (+13406.74, +7.729%) regressed
+  bench_B3_b50_tight_due.json: 1568910.56 -> 1286556.66 (-282353.90, -17.997%) IMPROVED
+  bench_B4_b70_dense_geometry.json: 851935.05 -> 676153.36 (-175781.69, -20.633%) IMPROVED
+  bench_B4_b90_crane_trap.json: 2006372.04 -> 2435645.60 (+429273.56, +21.396%) regressed
+  bench_B5_b120_preference_skew.json: 1057836.92 -> 1018181.61 (-39655.32, -3.749%) IMPROVED
+  bench_B5_b150_mixed_hard.json: 4560843.94 -> 3876009.92 (-684834.02, -15.016%) IMPROVED
+  my_B5_b200_hard.json: 11710324.01 -> 10559498.81 (-1150825.19, -9.827%) IMPROVED
+  smoke_B3_b20_balanced.json: 113259.93 -> 113537.74 (+277.80, +0.245%) regressed
+  smoke_B3_b30_dense_geometry.json: 235444.92 -> 236630.10 (+1185.18, +0.503%) regressed
+
+summary: improved=5 regressed=4 unchanged=0 new_infeasible=0

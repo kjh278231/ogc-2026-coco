@@ -1,0 +1,10 @@
+{"t": 0.343, "event": "sa.worker.start", "seed": 12346, "profile": "balanced"}
+{"t": 0.485, "event": "sa.temperature.init", "T0": 1.0, "T_min": 0.001, "cooling": 0.998, "base_full_period": 100, "n_blocks": 250, "profile": "balanced"}
+{"t": 0.589, "event": "sa.fast_full_mismatch", "iteration": 2, "move_type": "small_orient_swap", "fast_feasible": true, "full_feasible": false, "fast_obj": 120079486.95130672, "changed_blocks": [91], "action": "rollback_snapshot"}
+{"t": 0.719, "event": "sa.fast_full_mismatch", "iteration": 8, "move_type": "small_orient_swap", "fast_feasible": true, "full_feasible": false, "fast_obj": 120079486.95130672, "changed_blocks": [159], "action": "rollback_snapshot"}
+{"t": 4.4356, "event": "sa.fast_full_mismatch", "iteration": 15, "move_type": "small_entry_shift", "fast_feasible": true, "full_feasible": false, "fast_obj": 120079486.95130672, "changed_blocks": [104], "action": "rollback_snapshot"}
+{"t": 4.6106, "event": "sa.fast_full_mismatch", "iteration": 19, "move_type": "small_entry_shift", "fast_feasible": true, "full_feasible": false, "fast_obj": 120079486.95130672, "changed_blocks": [160], "action": "rollback_snapshot"}
+{"t": 8.7566, "event": "sa.fast_full_mismatch", "iteration": 24, "move_type": "small_orient_swap", "fast_feasible": true, "full_feasible": false, "fast_obj": 120079486.95130672, "changed_blocks": [159], "action": "rollback_snapshot"}
+{"t": 17.8058, "event": "sa.fast_full_mismatch", "iteration": 34, "move_type": "medium_pos_perturb", "fast_feasible": true, "full_feasible": false, "fast_obj": 120079486.95130672, "changed_blocks": [84], "action": "rollback_snapshot"}
+{"t": 21.5149, "event": "sa.complete", "iterations": 35, "improvements": 0, "accepts": 6, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 21, "worse_limit_rejects": 0, "full_checks": 6, "mismatches": 6, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 0, "best_objective": Infinity, "final_T": 0.932328, "T0": 1.0, "pair_cache_size": 131, "crane_cache_size": 186}
+{"t": 21.5149, "event": "sa.worker.done", "seed": 12346, "profile": "balanced", "feasible": false, "objective": Infinity, "iterations": 35}

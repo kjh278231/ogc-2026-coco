@@ -1,0 +1,47 @@
+{"t": 0.1792, "event": "sa.worker.start", "seed": 36103, "profile": "local_position"}
+{"t": 0.2122, "event": "sa.temperature.init", "T0": 28.94622870293379, "T_min": 0.028946228702933792, "cooling": 0.999, "base_full_period": 100, "n_blocks": 200, "profile": "local_position"}
+{"t": 0.7082, "event": "sa.improvement", "iteration": 43, "move_type": "large", "objective": 102055001.68791209}
+{"t": 1.5133, "event": "sa.improvement", "iteration": 61, "move_type": "large", "objective": 94658795.16703297}
+{"t": 2.4334, "event": "sa.full_check.best", "iteration": 83, "move_type": "small_entry_shift", "objective": 94652795.16703297, "fast_obj": 94652795.16703297}
+{"t": 3.101, "event": "sa.improvement", "iteration": 97, "move_type": "large", "objective": 88949454.12822403}
+{"t": 4.0623, "event": "sa.improvement", "iteration": 98, "move_type": "large", "objective": 83355626.12409727}
+{"t": 4.0924, "event": "sa.full_check.best", "iteration": 101, "move_type": "small_entry_shift", "objective": 83352626.12409727, "fast_obj": 83352626.12409727}
+{"t": 4.9428, "event": "sa.improvement", "iteration": 106, "move_type": "large", "objective": 78187345.33795136}
+{"t": 6.1854, "event": "sa.improvement", "iteration": 108, "move_type": "large", "objective": 74223665.01532793}
+{"t": 7.3176, "event": "sa.improvement", "iteration": 110, "move_type": "large", "objective": 70750632.99926308}
+{"t": 8.323, "event": "sa.improvement", "iteration": 111, "move_type": "large", "objective": 68015973.20879121}
+{"t": 8.3653, "event": "sa.full_check.best", "iteration": 113, "move_type": "small_entry_shift", "objective": 68000973.20879121, "fast_obj": 68000973.20879121}
+{"t": 9.479, "event": "sa.improvement", "iteration": 120, "move_type": "large", "objective": 66334130.01532793}
+{"t": 10.7065, "event": "sa.improvement", "iteration": 132, "move_type": "large", "objective": 63512907.39439941}
+{"t": 10.7622, "event": "sa.full_check.best", "iteration": 133, "move_type": "small_entry_shift", "objective": 63506907.39439941, "fast_obj": 63506907.39439941}
+{"t": 10.8187, "event": "sa.full_check.best", "iteration": 145, "move_type": "medium_bay_change", "objective": 63506761.27318729, "fast_obj": 63506761.27318729}
+{"t": 10.8691, "event": "sa.full_check.best", "iteration": 152, "move_type": "small_entry_shift", "objective": 63500761.27318729, "fast_obj": 63500761.27318729}
+{"t": 10.9195, "event": "sa.full_check.best", "iteration": 162, "move_type": "small_entry_shift", "objective": 63494761.27318729, "fast_obj": 63494761.27318729}
+{"t": 12.1412, "event": "sa.improvement", "iteration": 163, "move_type": "large", "objective": 59974596.29337889}
+{"t": 13.3064, "event": "sa.full_check.best", "iteration": 169, "move_type": "small_entry_shift", "objective": 59959596.29337889, "fast_obj": 59959596.29337889}
+{"t": 14.3467, "event": "sa.improvement", "iteration": 173, "move_type": "large", "objective": 59417171.65329337}
+{"t": 15.4507, "event": "sa.improvement", "iteration": 176, "move_type": "large", "objective": 58828196.00098568}
+{"t": 15.4847, "event": "sa.full_check.best", "iteration": 180, "move_type": "small_entry_shift", "objective": 58822196.00098568, "fast_obj": 58822196.00098568}
+{"t": 16.7339, "event": "sa.improvement", "iteration": 181, "move_type": "large", "objective": 57688929.015265405}
+{"t": 18.0062, "event": "sa.improvement", "iteration": 188, "move_type": "large", "objective": 54423746.00274392}
+{"t": 18.0532, "event": "sa.full_check.best", "iteration": 200, "move_type": "small_entry_shift", "objective": 54420746.00274392, "fast_obj": 54420746.00274392}
+{"t": 18.1012, "event": "sa.full_check.best", "iteration": 202, "move_type": "small_entry_shift", "objective": 54417746.00274392, "fast_obj": 54417746.00274392}
+{"t": 19.3856, "event": "sa.improvement", "iteration": 225, "move_type": "large", "objective": 53674780.34570018}
+{"t": 19.4469, "event": "sa.full_check.best", "iteration": 230, "move_type": "small_entry_shift", "objective": 53668780.34570018, "fast_obj": 53668780.34570018}
+{"t": 22.0616, "event": "sa.improvement", "iteration": 239, "move_type": "large", "objective": 52955463.0877783}
+{"t": 22.1179, "event": "sa.full_check.best", "iteration": 243, "move_type": "small_entry_shift", "objective": 52946463.0877783, "fast_obj": 52946463.0877783}
+{"t": 22.1719, "event": "sa.full_check.best", "iteration": 245, "move_type": "small_entry_shift", "objective": 52937463.0877783, "fast_obj": 52937463.0877783}
+{"t": 22.2189, "event": "sa.full_check.best", "iteration": 259, "move_type": "medium_bay_change", "objective": 52937225.54232375, "fast_obj": 52937225.54232375}
+{"t": 22.2579, "event": "sa.full_check.best", "iteration": 272, "move_type": "small_entry_shift", "objective": 52922225.54232375, "fast_obj": 52922225.54232375}
+{"t": 22.3191, "event": "sa.full_check.best", "iteration": 276, "move_type": "small_entry_shift", "objective": 52916225.54232375, "fast_obj": 52916225.54232375}
+{"t": 23.4862, "event": "sa.improvement", "iteration": 278, "move_type": "large", "objective": 52220373.42530091}
+{"t": 26.0855, "event": "sa.improvement", "iteration": 294, "move_type": "large", "objective": 51698715.21970032}
+{"t": 27.4933, "event": "sa.improvement", "iteration": 297, "move_type": "large", "objective": 50355432.8396004}
+{"t": 28.7101, "event": "sa.improvement", "iteration": 298, "move_type": "large", "objective": 50355032.268399544}
+{"t": 29.9272, "event": "sa.improvement", "iteration": 299, "move_type": "large", "objective": 50096799.577182814}
+{"t": 31.3754, "event": "sa.full_check.best", "iteration": 311, "move_type": "small_entry_shift", "objective": 50087799.577182814, "fast_obj": 50087799.577182814}
+{"t": 31.4194, "event": "sa.full_check.best", "iteration": 322, "move_type": "medium_bay_change", "objective": 50087573.10683317, "fast_obj": 50087573.10683317}
+{"t": 32.6418, "event": "sa.improvement", "iteration": 326, "move_type": "large", "objective": 49370410.81680847}
+{"t": 32.6868, "event": "sa.full_check.best", "iteration": 334, "move_type": "small_entry_shift", "objective": 49355410.81680847, "fast_obj": 49355410.81680847}
+{"t": 34.9935, "event": "sa.complete", "iterations": 344, "improvements": 43, "accepts": 83, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 234, "worse_limit_rejects": 0, "full_checks": 20, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 334, "best_objective": 49355410.81680847, "final_T": 20.517287, "T0": 28.94622870293379, "pair_cache_size": 354, "crane_cache_size": 320}
+{"t": 34.9935, "event": "sa.worker.done", "seed": 36103, "profile": "local_position", "feasible": true, "objective": 49355410.81680847, "iterations": 344}

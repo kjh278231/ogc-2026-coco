@@ -1,0 +1,8 @@
+{"t": 0.0, "event": "algo.start", "timelimit": 60.0}
+{"t": 0.001, "event": "algo.context", "n_blocks": 20, "n_bays": 3, "w1": 2667.0, "w2": 7.0, "w3": 20.0, "algo": "athena"}
+{"t": 0.0436, "event": "athena.features.done", "elapsed": 0.044}
+{"t": 0.0446, "event": "athena.smoothing.done", "elapsed": 0.045}
+{"t": 0.2607, "event": "athena.init.done", "elapsed": 0.261, "feasible": true, "stage": "5", "objective": 113259.93357694108, "n_forced": 0}
+{"t": 0.2607, "event": "athena.parallel_sa.start", "n_workers": 4, "remaining": 54.939, "worker_deadline": 55.2, "gather_deadline": 59.5}
+{"t": 55.2151, "event": "athena.parallel_sa.done", "feasible": true, "objective": 829.2323629229633, "n_results": 4, "n_feasible": 4}
+{"t": 55.2191, "event": "algo.end", "best_objective": 829.2323629229633, "wall_time": 55.219, "has_solution": true, "sa_iterations": 0, "sa_improvements": 0}

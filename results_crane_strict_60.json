@@ -1,0 +1,17 @@
+[
+    {
+        "instance": "bench_B4_b90_crane_trap",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 13721493.89,
+            "time_seconds": 9.051032543182373
+        },
+        "myalgorithm": {
+            "feasible": false,
+            "stage": 2,
+            "objective": null,
+            "time_seconds": 59.500380992889404
+        }
+    }
+]

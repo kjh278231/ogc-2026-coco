@@ -1,0 +1,11 @@
+{"t": 0.288, "event": "sa.worker.start", "seed": 36103, "profile": "local_position"}
+{"t": 0.389, "event": "sa.temperature.init", "T0": 10385.273835932885, "T_min": 10.385273835932885, "cooling": 0.999, "base_full_period": 100, "n_blocks": 250, "profile": "local_position"}
+{"t": 0.39, "event": "sa.accept.worse", "iteration": 2, "T": 10374.8886, "curr_obj": 38060914.0895952, "new_obj": 38061878.90552892, "delta_obj": 964.8159337192774, "delta_tardiness": 0.0, "accept_prob": 0.911198, "changed_blocks": [192], "move_type": "medium_bay_change"}
+{"t": 0.478, "event": "sa.full_check.best", "iteration": 23, "move_type": "small_entry_shift", "objective": 38044100.90552892, "fast_obj": 38044100.90552892}
+{"t": 0.486, "event": "sa.accept.worse", "iteration": 36, "T": 10027.9011, "curr_obj": 38044100.90552892, "new_obj": 38050811.533709794, "delta_obj": 6710.628180876374, "delta_tardiness": 0.0, "accept_prob": 0.51212, "changed_blocks": [125], "move_type": "medium_bay_change"}
+{"t": 24.6602, "event": "sa.full_check.best", "iteration": 131, "move_type": "small_entry_shift", "objective": 38033033.533709794, "fast_obj": 38033033.533709794}
+{"t": 24.7829, "event": "sa.full_check.best", "iteration": 132, "move_type": "small_entry_shift", "objective": 38024144.533709794, "fast_obj": 38024144.533709794}
+{"t": 24.9084, "event": "sa.full_check.best", "iteration": 135, "move_type": "small_entry_shift", "objective": 38015255.533709794, "fast_obj": 38015255.533709794}
+{"t": 29.7398, "event": "sa.full_check.best", "iteration": 146, "move_type": "small_entry_shift", "objective": 37970810.533709794, "fast_obj": 37970810.533709794}
+{"t": 36.5301, "event": "sa.complete", "iterations": 179, "improvements": 5, "accepts": 30, "worse_accepts": 2, "worse_z1_accepts": 0, "fast_rejects": 127, "worse_limit_rejects": 0, "full_checks": 5, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 146, "best_objective": 37970810.533709794, "final_T": 8682.411092, "T0": 10385.273835932885, "pair_cache_size": 364, "crane_cache_size": 498}
+{"t": 36.5301, "event": "sa.worker.done", "seed": 36103, "profile": "local_position", "feasible": true, "objective": 37970810.533709794, "iterations": 179}

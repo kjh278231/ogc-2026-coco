@@ -1,0 +1,18 @@
+{"t": 0.0701, "event": "sa.worker.start", "seed": 36103, "profile": "local_position"}
+{"t": 0.1133, "event": "sa.temperature.init", "T0": 13595.140112999148, "T_min": 13.595140112999148, "cooling": 0.999, "base_full_period": 50, "n_blocks": 100, "profile": "local_position"}
+{"t": 2.4766, "event": "sa.full_check.best", "iteration": 109, "move_type": "small_entry_shift", "objective": 39293870.13899782, "fast_obj": 39293870.13899782}
+{"t": 3.1658, "event": "sa.full_check.best", "iteration": 119, "move_type": "small_entry_shift", "objective": 39264779.13899782, "fast_obj": 39264779.13899782}
+{"t": 3.2146, "event": "sa.full_check.best", "iteration": 120, "move_type": "small_entry_shift", "objective": 39206597.13899782, "fast_obj": 39206597.13899782}
+{"t": 5.1745, "event": "sa.full_check.best", "iteration": 163, "move_type": "small_entry_shift", "objective": 39177506.13899782, "fast_obj": 39177506.13899782}
+{"t": 9.7837, "event": "sa.full_check.best", "iteration": 213, "move_type": "small_entry_shift", "objective": 39119324.13899782, "fast_obj": 39119324.13899782}
+{"t": 9.8308, "event": "sa.full_check.best", "iteration": 217, "move_type": "small_entry_shift", "objective": 39090233.13899782, "fast_obj": 39090233.13899782}
+{"t": 26.0889, "event": "sa.full_check.best", "iteration": 390, "move_type": "small_entry_shift", "objective": 39032051.13899782, "fast_obj": 39032051.13899782}
+{"t": 28.7123, "event": "sa.full_check.best", "iteration": 403, "move_type": "small_entry_shift", "objective": 39002960.13899782, "fast_obj": 39002960.13899782}
+{"t": 32.2553, "event": "sa.full_check.best", "iteration": 494, "move_type": "small_entry_shift", "objective": 38973869.13899782, "fast_obj": 38973869.13899782}
+{"t": 32.3084, "event": "sa.full_check.best", "iteration": 497, "move_type": "small_entry_shift", "objective": 38944778.13899782, "fast_obj": 38944778.13899782}
+{"t": 41.9911, "event": "sa.periodic_full_check", "iteration": 624, "feasible": true, "period": 50}
+{"t": 46.4409, "event": "sa.full_check.best", "iteration": 712, "move_type": "small_entry_shift", "objective": 38886596.13899782, "fast_obj": 38886596.13899782}
+{"t": 49.1978, "event": "sa.full_check.best", "iteration": 731, "move_type": "small_entry_shift", "objective": 38857505.13899782, "fast_obj": 38857505.13899782}
+{"t": 50.2302, "event": "sa.improvement", "iteration": 746, "move_type": "large", "objective": 38799323.13899782}
+{"t": 50.2302, "event": "sa.complete", "iterations": 746, "improvements": 13, "accepts": 63, "worse_accepts": 0, "worse_z1_accepts": 0, "fast_rejects": 582, "worse_limit_rejects": 0, "full_checks": 13, "mismatches": 0, "rollback_last_valid": 0, "rollback_best": 0, "last_improvement_iter": 746, "best_objective": 38799323.13899782, "final_T": 6445.22235, "T0": 13595.140112999148, "pair_cache_size": 1148, "crane_cache_size": 1808}
+{"t": 50.2302, "event": "sa.worker.done", "seed": 36103, "profile": "local_position", "feasible": true, "objective": 38799323.13899782, "iterations": 746}

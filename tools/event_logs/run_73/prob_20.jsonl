@@ -1,0 +1,17 @@
+{"t": 0.0, "event": "algo.start", "timelimit": 240.0}
+{"t": 0.0, "event": "algo.context", "n_blocks": 300, "n_bays": 5, "w1": 26667.0, "w2": 6.0, "w3": 125.0, "algo": "athena"}
+{"t": 0.1526, "event": "athena.features.done", "elapsed": 0.153}
+{"t": 0.1526, "event": "athena.time_plan", "tier": "long", "init_deadline": 48.0, "fallback_deadline": 72.0, "repair_deadline": 84.0, "sa_deadline": 220.8, "gather_deadline": 239.5}
+{"t": 0.2319, "event": "athena.init.emergency", "elapsed": 0.232, "feasible": true, "stage": "5", "objective": 1461436165.5526116, "missing": 0}
+{"t": 0.2339, "event": "athena.smoothing.done", "elapsed": 0.234}
+{"t": 13.6894, "event": "athena.init.done", "elapsed": 13.689, "feasible": true, "stage": "5", "objective": 129884685.94874585, "n_forced": 0, "n_unplaced": 0}
+{"t": 26.3145, "event": "athena.init.fallback", "elapsed": 26.314, "feasible": true, "stage": "5", "objective": 123895485.03004023, "n_forced": 0, "n_unplaced": 0, "reason": "tardy_compare", "selected": true}
+{"t": 26.3145, "event": "athena.parallel_sa.start", "n_workers": 4, "remaining": 194.486, "worker_deadline": 220.8, "gather_deadline": 239.5, "mode": "batched"}
+{"t": 26.3145, "event": "athena.parallel_sa.batch_start", "batch": 1, "worker_deadline": 116.314, "remaining": 90.0}
+{"t": 116.3451, "event": "athena.parallel_sa.batch_done", "batch": 1, "feasible": true, "objective": 122399338.2168046, "n_results": 4, "n_feasible": 4}
+{"t": 116.4186, "event": "athena.parallel_sa.batch_selected", "batch": 1, "objective": 122399338.2168046}
+{"t": 116.4186, "event": "athena.parallel_sa.batch_start", "batch": 2, "worker_deadline": 206.419, "remaining": 90.0}
+{"t": 206.4465, "event": "athena.parallel_sa.batch_done", "batch": 2, "feasible": true, "objective": 122372671.2168046, "n_results": 4, "n_feasible": 4}
+{"t": 206.5175, "event": "athena.parallel_sa.batch_selected", "batch": 2, "objective": 122372671.2168046}
+{"t": 206.5175, "event": "athena.parallel_sa.done", "feasible": true, "objective": 122372671.2168046, "n_results": 8, "n_feasible": 8, "batches": 2}
+{"t": 206.5175, "event": "algo.end", "best_objective": 122372671.2168046, "wall_time": 206.518, "has_solution": true, "sa_iterations": 0, "sa_improvements": 0}

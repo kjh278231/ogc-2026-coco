@@ -1,0 +1,1 @@
+{"pin": "win32 SetProcessAffinityMask FAILED for [16, 17, 18, 19]", "cores": [16, 17, 18, 19], "results": {"bench_B5_b120_preference_skew": {"feasible": true, "stage": "5", "obj1": 492.0, "obj2": 1778.4890926932367, "obj3": 341.0, "total_obj": 928886.4018342391, "wall_time": 55.3047821521759, "error": null}}}

@@ -1,0 +1,17 @@
+[
+    {
+        "instance": "smoke_B3_b20_balanced",
+        "baseline_greedy": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 1566.18,
+            "time_seconds": 0.7623157501220703
+        },
+        "myalgorithm": {
+            "feasible": true,
+            "stage": 5,
+            "objective": 1566.18,
+            "time_seconds": 2.86271071434021
+        }
+    }
+]

@@ -1,0 +1,6 @@
+[Custom-SA] Evaluating selected heuristics ['EDD', 'SlackRatio', 'MST', 'LargestArea']...
+[Custom-SA] Chosen Initial Heuristic: EDD | Best Objective: 54906.18
+[Custom-SA] Starting Simulated Annealing over block permutations...
+[Custom-SA] Iteration 1 (invert): New best objective: 1574.82
+[Custom-SA] Completed search. Total iterations: 3 | Improvements: 1
+[Custom-SA] Best Objective: 1574.82
