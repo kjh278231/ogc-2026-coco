@@ -1,17 +1,23 @@
-# myalgorithm.py
-# This is a template for the custom algorithm.
+# myalgorithm.py -- OGC 2026 submission entry point.
+#
+# Framework: assignment search scored by a per-bay footprint-disjoint admission
+# packer (crane extraction is free by construction since no two co-resident blocks
+# share a footprint, affordable because bay area utilisation is low). Time-managed
+# to respect `timelimit`; always returns a feasible solution.
+# See docs/technical_report.md and docs/methodology.md.
 
 
 def algorithm(prob_info, timelimit=60):
     """
-    This is a template for the custom algorithm.
-    The function signature must not be changed or removed, but you can define extra functions or modules that are used in this function.
-    The `prob_info` is a dictionary containing the problem information, and `timelimit` is the time limit for the algorithm in seconds.
-    The function should return a solution in the format specified in the problem statement.
-    Please refer to baseline_greedy.py for an example implementation of a simple greedy algorithm. You can use it as a starting point or reference for your own algorithm.
+    Entry point required by the evaluation server.
+    `prob_info`: instance dict (bays, blocks, weights).
+    `timelimit`: wall-clock budget in seconds.
+    Returns a solution dict {"operations": {...}}.
     """
-
-    # You can import other modules or define extra functions here.
-    import baseline_greedy
-
-    return baseline_greedy.greedyalgorithm(prob_info, timelimit)
+    import solver
+    try:
+        return solver.framework_solve(prob_info, timelimit)
+    except Exception:
+        # last-resort guaranteed-feasible fallback: most-preferred-bay assignment,
+        # footprint-disjoint placement (never crane-trapped), exit ASAP.
+        return solver.build_solution(prob_info, solver.a_pref(prob_info))
