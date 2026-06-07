@@ -12,7 +12,15 @@ never exceeds `timelimit`; always returns a feasible solution (disjoint placemen
 from __future__ import annotations
 import time
 import math
+import os
 from utils import Bay, Block, check_entry, check_exit
+
+try:
+    from shapely.geometry import Polygon as _ShapelyPolygon
+    from shapely.ops import unary_union as _unary_union
+    _HAS_SHAPELY = True
+except Exception:                       # pragma: no cover
+    _HAS_SHAPELY = False
 
 
 # --------------------------------------------------------------------------- #
@@ -68,7 +76,61 @@ def find_slot(bay, present_objs, overlap_objs, bd, bid, W, H, step):
     return None
 
 
-def solve_bay(prob, j, ids, step=2, tcap=200):
+def _footprint(blk):
+    """Shapely union of a placed block's layer polygons (its true footprint)."""
+    polys = []
+    for layer in blk.layers_at_pos():
+        if len(layer) >= 3:
+            p = _ShapelyPolygon(layer)
+            if not p.is_valid:
+                p = p.buffer(0)
+            polys.append(p)
+    return _unary_union(polys) if polys else None
+
+
+def find_slot_poly(bay, present_objs, overlap_objs, bd, bid, W, H, step):
+    """Like find_slot but disjointness is the EXACT footprint (polygon), which is
+    strictly more permissive than AABB (packs tighter). AABB is used only as a
+    cheap pre-filter to skip pairs that cannot possibly overlap."""
+    ov = [(ob.bounding_rect(), _footprint(ob)) for ob in overlap_objs]
+    for o in range(len(bd["shape"])):
+        mnx, mny, mxx, mxy = orient_bbox(bd, o)
+        x_start = math.ceil(max(0.0, -mnx))
+        x_end = math.floor(W - mxx)
+        y_start = math.ceil(max(0.0, -mny))
+        y_end = math.floor(H - mxy)
+        if x_end < x_start or y_end < y_start:
+            continue
+        for y in range(y_start, y_end + 1, step):
+            for x in range(x_start, x_end + 1, step):
+                cand = Block(block_id=bid, block_data=bd, x=x, y=y, orient_idx=o)
+                cb = cand.bounding_rect()
+                cfp = None
+                bad = False
+                for (ob_box, ob_fp) in ov:
+                    if not (cb[0] < ob_box[2] and ob_box[0] < cb[2]
+                            and cb[1] < ob_box[3] and ob_box[1] < cb[3]):
+                        continue  # AABBs disjoint => footprints disjoint
+                    if cfp is None:
+                        cfp = _footprint(cand)
+                    if cfp is not None and ob_fp is not None and cfp.intersection(ob_fp).area > 1e-9:
+                        bad = True
+                        break
+                if bad:
+                    continue
+                if check_entry(bay, present_objs, cand):
+                    continue
+                return (x, y, o)
+    return None
+
+
+def solve_bay(prob, j, ids, step=2, tcap=200, poly=False, deadline=None):
+    """Per-bay footprint-disjoint admission packer. If poly=True, escalate to the
+    exact polygon-disjoint check whenever cheap AABB finds no slot at a time t
+    (recovers packing-driven tardiness; pays the shapely cost only where needed).
+    Once `deadline` (wall-clock) passes, poly escalation is dropped so the pack
+    always finishes in bounded time (AABB-only is the validated-feasible floor)."""
+    use_poly = poly and _HAS_SHAPELY
     bays = prob["bays"]
     blocks = prob["blocks"]
     bay = Bay.from_dict(bays[j], j)
@@ -87,6 +149,11 @@ def solve_bay(prob, j, ids, step=2, tcap=200):
             overlap = [Block(p["id"], blocks[p["id"]], p["x"], p["y"], p["o"])
                        for p in placed if p["entry"] < t + P and t < p["exit"]]
             slot = find_slot(bay, present, overlap, bd, i, W, H, step)
+            if slot is None and use_poly:
+                if deadline is not None and time.time() > deadline:
+                    use_poly = False  # out of time: revert to AABB for the rest
+                else:
+                    slot = find_slot_poly(bay, present, overlap, bd, i, W, H, step)
             if slot:
                 chosen = (t, slot[0], slot[1], slot[2])
                 break
@@ -333,14 +400,19 @@ def improved_search(prob, cache, deadline):
 # --------------------------------------------------------------------------- #
 # solution assembly + top-level solve
 # --------------------------------------------------------------------------- #
-def build_solution(prob, assign):
+def build_solution(prob, assign, poly_deadline=None):
     m = len(prob["bays"])
     ops = {}
     for j in range(m):
         ids = [i for i, a in assign.items() if a == j]
         if not ids:
             continue
-        placed = solve_bay(prob, j, ids)
+        # exact polygon packing for the final solution (recovers packing-driven
+        # tardiness), bounded by poly_deadline; AABB-only past it.
+        # SOLVER_NOPOLY=1 disables it (AABB-only ablation baseline).
+        use_poly = ((poly_deadline is None or time.time() < poly_deadline)
+                    and not os.environ.get("SOLVER_NOPOLY"))
+        placed = solve_bay(prob, j, ids, poly=use_poly, deadline=poly_deadline)
         _, exits = extract_tardiness(prob, j, placed)
         for p in placed:
             en, ex = int(p["entry"]), int(exits[p["id"]])
@@ -361,19 +433,26 @@ def framework_solve(prob, timelimit):
     returns a feasible solution."""
     t0 = time.time()
     cache = {}
-    build_margin = max(4.0, timelimit * 0.12)   # final assembly re-packs all bays
-    overrun = 2.0                                # one bay-pack can overshoot a check
-    search_total = max(0.0, timelimit - build_margin - overrun)
-    half = search_total * 0.5
+    safety = max(2.0, timelimit * 0.04)
 
-    # best heuristic as a guaranteed feasible floor
-    best_seed, bt = None, float("inf")
+    # best heuristic as a guaranteed feasible floor; also detect whether tardiness
+    # is even in play (min obj1 over seeds).
+    best_seed, bt, min_o1 = None, float("inf"), float("inf")
     for fn in (a_pref, a_balanced_load, a_pref_capped):
         a = fn(prob)
-        tot, _ = total_obj(prob, a, cache)
+        tot, perbay = total_obj(prob, a, cache)
+        min_o1 = min(min_o1, sum(perbay.values()))
         if tot < bt:
             bt, best_seed = tot, a
     best, best_tot = best_seed, bt
+
+    # The exact polygon final-build only recovers PACKING-driven tardiness, so
+    # reserve time for it only when tardiness is in play; preference-only instances
+    # (some seed already reaches obj1=0) give nearly all the budget to search.
+    poly_build_reserve = (max(6.0, timelimit * 0.30) if min_o1 > 1e-9
+                          else max(1.0, timelimit * 0.04))
+    search_total = max(0.0, timelimit - poly_build_reserve - safety)
+    half = search_total * 0.5
 
     try:
         asg_imp, t_imp = improved_search(prob, cache, deadline=t0 + half)
@@ -385,4 +464,5 @@ def framework_solve(prob, timelimit):
     except Exception:
         pass  # keep the best feasible assignment found so far
 
-    return build_solution(prob, best)
+    poly_deadline = t0 + timelimit - safety
+    return build_solution(prob, best, poly_deadline=poly_deadline)
