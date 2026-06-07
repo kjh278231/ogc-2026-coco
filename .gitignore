@@ -1,2 +1,16 @@
-.venv
+# Environments / deps (local only)
+.venv/
+.codex_deps/
+
+# Python caches
 __pycache__/
+*.pyc
+*.pyo
+
+# Local data (download organizer instances separately; benchmarks are generated)
+train/
+alg_tester/example/benchmark/
+
+# Reference papers / large local artifacts
+2606.03303v2.pdf
+*-latest-*.zip
