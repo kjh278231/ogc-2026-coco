@@ -13,6 +13,7 @@ from __future__ import annotations
 import time
 import math
 import os
+import random
 from utils import Bay, Block, check_entry, check_exit
 
 try:
@@ -397,6 +398,69 @@ def improved_search(prob, cache, deadline):
     return cur, cur_tot
 
 
+def _climb(prob, assign, cache, deadline):
+    """Hill climb to convergence-or-deadline: move blocks in tardy bays (Z1), the
+    max-(u*load) bay (Z2), or off their preferred bay (Z3); targets preference-first."""
+    blocks = prob["blocks"]
+    bays = prob["bays"]
+    m = len(bays)
+    areas = [b["width"] * b["height"] for b in bays]
+    avg = sum(areas) / m
+    u = [avg / a for a in areas]
+    pref_bay = {i: max(range(m), key=lambda j: blocks[i]["bay_preferences"][j])
+                for i in range(len(blocks))}
+    cur = dict(assign)
+    cur_tot, perbay = total_obj(prob, cur, cache)
+    improved = True
+    while improved and time.time() < deadline:
+        improved = False
+        loads = [0.0] * m
+        for i, j in cur.items():
+            loads[j] += blocks[i]["workload"]
+        maxload = max(range(m), key=lambda j: u[j] * loads[j])
+        tardy = {j for j in range(m) if perbay.get(j, 0) > 0}
+        movers = [i for i in cur if cur[i] in tardy or cur[i] == maxload
+                  or cur[i] != pref_bay[i]]
+        for i in movers:
+            if time.time() >= deadline:
+                break
+            targets = sorted((j for j in range(m)
+                              if j != cur[i] and fits(blocks[i], bays[j])),
+                             key=lambda j: -blocks[i]["bay_preferences"][j])
+            for j in targets:
+                trial = dict(cur)
+                trial[i] = j
+                tot, _ = total_obj(prob, trial, cache)
+                if tot < cur_tot - 1e-9:
+                    cur, cur_tot = trial, tot
+                    _, perbay = total_obj(prob, cur, cache)
+                    improved = True
+                    break
+    return cur, cur_tot
+
+
+def _ils(prob, best, best_tot, cache, deadline, rng):
+    """Iterated local search on the IDLE time left after the main search converges.
+    Perturb the incumbent by re-homing a few random blocks, re-optimise, keep the
+    global best. Uses spare time only -- never fragments the main search budget."""
+    blocks = prob["blocks"]
+    bays = prob["bays"]
+    m = len(bays)
+    ids = list(best)
+    while time.time() < deadline:
+        k = rng.randint(2, 5)
+        cand = dict(best)
+        for _ in range(k):
+            i = rng.choice(ids)
+            opts = [j for j in range(m) if j != cand[i] and fits(blocks[i], bays[j])]
+            if opts:
+                cand[i] = rng.choice(opts)
+        cur, tot = _climb(prob, cand, cache, deadline)
+        if tot < best_tot - 1e-9:
+            best, best_tot = cur, tot
+    return best, best_tot
+
+
 # --------------------------------------------------------------------------- #
 # solution assembly + top-level solve
 # --------------------------------------------------------------------------- #
@@ -461,6 +525,11 @@ def framework_solve(prob, timelimit):
         asg_bas, t_bas = local_search(prob, best_seed, cache, deadline=t0 + search_total)
         if t_bas < best_tot:
             best, best_tot = asg_bas, t_bas
+        # iterated local search on whatever time the main search left unused
+        # (SOLVER_NOILS=1 disables it -- ablation baseline)
+        if not os.environ.get("SOLVER_NOILS"):
+            best, best_tot = _ils(prob, best, best_tot, cache,
+                                  deadline=t0 + search_total, rng=random.Random(0))
     except Exception:
         pass  # keep the best feasible assignment found so far
 
