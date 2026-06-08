@@ -100,12 +100,35 @@ cleanest demonstration of the eval-mode tool's value.)
 
 ---
 
-## Net outcome of this cycle
-- Kept: **best-of build fix** (32429ca) and **deterministic eval mode** (7d63719).
-- Rejected: set-partitioning recombination (H1/H2), (j,ids) cache.
-- No large algorithmic jump, but measurement is now reliable — the basis for all
-  further work.
+## H3 — signal-guided ILS destroy (env-gated, not default)
 
-## Pending
-- **H3 — smarter destroy-repair perturbation**, to be A/B'd in eval mode (random vs
-  signal-guided destroy + ordered repair).
+Replace random ILS perturbation with destroy of *contributing* blocks (in a tardy
+bay, the max-(u·load) bay, or off their preferred bay). Deterministic eval-mode A/B
+(E=2000), `SOLVER_GUIDED=1` (always guided) and `=mix` (50/50) vs default random:
+
+| instance | random | guided | mix |
+|---|---|---|---|
+| prob_5 | 114,920 | **−9.2%** | −0.5% |
+| prob_13 | 1,155,273 | **−9.3%** | +7.0% |
+| prob_15 | 246,421 | **−14.8%** | −5.7% |
+| prob_17 | 240,624 | **+32.3%** | 0% |
+| prob_18 | 653,728 | **+20.1%** | 0% |
+
+**Verdict: instance-dependent, no clean win.** Pure guided over-focuses on the same
+blocks → low diversity → big wins on 3, big losses on 2. The 50/50 mix avoids the
+losses but dilutes the wins (even regresses prob_13). Kept as an env-gated option
+(`SOLVER_GUIDED`, default unchanged = random) for possible instance-adaptive use.
+
+---
+
+## Net outcome of this cycle
+- Kept: **best-of build fix** (32429ca), **deterministic eval mode** (7d63719),
+  guided-ILS as an env-gated option (default unchanged).
+- Rejected as defaults: set-partitioning recombination (H1/H2), (j,ids) cache,
+  guided/mix ILS.
+- **Pattern:** all four advanced-search tweaks are mixed/marginal — the core design
+  (disjoint packing + best-of polygon + ILS) already captured the gains, and the
+  search is robust + high-variance, so single-axis tweaks help some instances and
+  hurt others. Low-hanging fruit is exhausted; further gains need a different angle
+  or instance-adaptive strategy selection.
+- Measurement is now reliable (eval mode) — the durable basis for any further work.

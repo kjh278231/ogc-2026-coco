@@ -492,18 +492,38 @@ def _climb(prob, assign, cache, deadline):
 
 
 def _ils(prob, best, best_tot, cache, deadline, rng):
-    """Iterated local search on the IDLE time left after the main search converges.
-    Perturb the incumbent by re-homing a few random blocks, re-optimise, keep the
-    global best. Uses spare time only -- never fragments the main search budget."""
+    """Iterated local search on the IDLE budget left after the main search converges.
+    Perturb the incumbent by re-homing a few blocks, re-optimise, keep the global
+    best. Default destroy is random; SOLVER_GUIDED=1 destroys *contributing* blocks
+    (in a tardy bay [Z1], the max-(u*load) bay [Z2], or off their preferred bay
+    [Z3]) -- repair stays randomized for diversity."""
     blocks = prob["blocks"]
     bays = prob["bays"]
     m = len(bays)
     ids = list(best)
+    guided = os.environ.get("SOLVER_GUIDED")   # "1"=always guided, "mix"=50/50
+    if guided:
+        areas = [b["width"] * b["height"] for b in bays]
+        u = [sum(areas) / m / a for a in areas]
+        pref_bay = {i: max(range(m), key=lambda j: blocks[i]["bay_preferences"][j])
+                    for i in range(len(blocks))}
     while _within(deadline):
         k = rng.randint(2, 5)
         cand = dict(best)
-        for _ in range(k):
-            i = rng.choice(ids)
+        use_g = guided and (guided != "mix" or rng.random() < 0.5)
+        if use_g:
+            _, perbay = total_obj(prob, best, cache)
+            loads = [0.0] * m
+            for i, j in best.items():
+                loads[j] += blocks[i]["workload"]
+            maxload = max(range(m), key=lambda j: u[j] * loads[j])
+            tardy = {j for j in range(m) if perbay.get(j, 0) > 0}
+            pool = [i for i in ids if best[i] in tardy or best[i] == maxload
+                    or best[i] != pref_bay[i]]
+            chosen = rng.sample(pool, min(k, len(pool))) if pool else rng.sample(ids, min(k, len(ids)))
+        else:
+            chosen = [rng.choice(ids) for _ in range(k)]
+        for i in chosen:
             opts = [j for j in range(m) if j != cand[i] and fits(blocks[i], bays[j])]
             if opts:
                 cand[i] = rng.choice(opts)
