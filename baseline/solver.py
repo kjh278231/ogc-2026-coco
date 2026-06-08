@@ -19,9 +19,16 @@ from utils import Bay, Block, check_entry, check_exit
 try:
     from shapely.geometry import Polygon as _ShapelyPolygon
     from shapely.ops import unary_union as _unary_union
+    from shapely.affinity import translate as _translate
     _HAS_SHAPELY = True
 except Exception:                       # pragma: no cover
     _HAS_SHAPELY = False
+
+# Cache of local (reference-anchored) footprints, keyed by (id(block_data), orient).
+# A block placed at (x,y) has world footprint = translate(local, x, y), so the
+# expensive polygon build happens once per (block, orientation) and translation is
+# a cheap affine transform.
+_LOCAL_FP: dict = {}
 
 
 # --------------------------------------------------------------------------- #
@@ -77,23 +84,36 @@ def find_slot(bay, present_objs, overlap_objs, bd, bid, W, H, step):
     return None
 
 
-def _footprint(blk):
-    """Shapely union of a placed block's layer polygons (its true footprint)."""
+def _local_footprint(bd, o):
+    """Footprint of the block at orientation o anchored at (0,0); cached so the
+    Shapely build runs once per (block, orientation)."""
+    key = (id(bd), o)
+    fp = _LOCAL_FP.get(key, 0)
+    if fp != 0:
+        return fp
     polys = []
-    for layer in blk.layers_at_pos():
+    for layer in Block(block_id=-1, block_data=bd, x=0, y=0, orient_idx=o).layers_at_pos():
         if len(layer) >= 3:
             p = _ShapelyPolygon(layer)
             if not p.is_valid:
                 p = p.buffer(0)
             polys.append(p)
-    return _unary_union(polys) if polys else None
+    fp = _unary_union(polys) if polys else None
+    _LOCAL_FP[key] = fp
+    return fp
 
 
-def find_slot_poly(bay, present_objs, overlap_objs, bd, bid, W, H, step):
+def _block_footprint(bd, x, y, o):
+    """World footprint = local footprint translated by (x, y) (cheap affine)."""
+    loc = _local_footprint(bd, o)
+    return _translate(loc, x, y) if loc is not None else None
+
+
+def find_slot_poly(bay, present_objs, ov_boxfps, bd, bid, W, H, step):
     """Like find_slot but disjointness is the EXACT footprint (polygon), which is
     strictly more permissive than AABB (packs tighter). AABB is used only as a
-    cheap pre-filter to skip pairs that cannot possibly overlap."""
-    ov = [(ob.bounding_rect(), _footprint(ob)) for ob in overlap_objs]
+    cheap pre-filter. `ov_boxfps` = precomputed [(bbox, footprint)] of the
+    temporally-overlapping placed blocks (footprints cached, not rebuilt here)."""
     for o in range(len(bd["shape"])):
         mnx, mny, mxx, mxy = orient_bbox(bd, o)
         x_start = math.ceil(max(0.0, -mnx))
@@ -108,12 +128,12 @@ def find_slot_poly(bay, present_objs, overlap_objs, bd, bid, W, H, step):
                 cb = cand.bounding_rect()
                 cfp = None
                 bad = False
-                for (ob_box, ob_fp) in ov:
+                for (ob_box, ob_fp) in ov_boxfps:
                     if not (cb[0] < ob_box[2] and ob_box[0] < cb[2]
                             and cb[1] < ob_box[3] and ob_box[1] < cb[3]):
                         continue  # AABBs disjoint => footprints disjoint
                     if cfp is None:
-                        cfp = _footprint(cand)
+                        cfp = _block_footprint(bd, x, y, o)
                     if cfp is not None and ob_fp is not None and cfp.intersection(ob_fp).area > 1e-9:
                         bad = True
                         break
@@ -154,7 +174,9 @@ def solve_bay(prob, j, ids, step=2, tcap=200, poly=False, deadline=None):
                 if deadline is not None and time.time() > deadline:
                     use_poly = False  # out of time: revert to AABB for the rest
                 else:
-                    slot = find_slot_poly(bay, present, overlap, bd, i, W, H, step)
+                    ov_boxfps = [(p["bb"], p["fp"]) for p in placed
+                                 if p["entry"] < t + P and t < p["exit"]]
+                    slot = find_slot_poly(bay, present, ov_boxfps, bd, i, W, H, step)
             if slot:
                 chosen = (t, slot[0], slot[1], slot[2])
                 break
@@ -177,8 +199,13 @@ def solve_bay(prob, j, ids, step=2, tcap=200, poly=False, deadline=None):
                               and math.ceil(max(0.0, -orient_bbox(bd, o)[1])) + orient_bbox(bd, o)[3] <= H), 0)
                 mnx, mny, _, _ = orient_bbox(bd, o_fit)
                 chosen = (t, math.ceil(max(0.0, -mnx)), math.ceil(max(0.0, -mny)), o_fit)
-        placed.append({"id": i, "x": chosen[1], "y": chosen[2], "o": chosen[3],
-                       "entry": chosen[0], "exit": chosen[0] + P})
+        rec = {"id": i, "x": chosen[1], "y": chosen[2], "o": chosen[3],
+               "entry": chosen[0], "exit": chosen[0] + P}
+        if use_poly:  # cache footprint + bbox so later poly checks never rebuild
+            blk_o = Block(i, bd, chosen[1], chosen[2], chosen[3])
+            rec["bb"] = blk_o.bounding_rect()
+            rec["fp"] = _block_footprint(bd, chosen[1], chosen[2], chosen[3])
+        placed.append(rec)
     return placed
 
 
