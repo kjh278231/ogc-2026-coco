@@ -121,12 +121,41 @@ losses but dilutes the wins (even regresses prob_13). Kept as an env-gated optio
 
 ---
 
+## H1 revisited — Z2-aware set-partitioning recombination (ADOPTED)
+
+H1 was dropped because the SP ignored Z2 (adopting an SP solution blew up Z2:
+prob_5 −81% on the full objective) and its one apparent win was a build-bug artifact.
+With both fixed — Z2 in the SP (min-max linearized: `M ≥ |u_j·load_j − u_k·load_k|`,
+objective `+ w2·M`) and the best-of build — it works.
+
+Rigorous premise test (deterministic eval mode, best-of column tardiness,
+`inc_missing=0`, SP objective `sane=OK`):
+
+| instance | E=1500 FULLΔ | E=3000 FULLΔ |
+|---|---|---|
+| prob_5 | +30.4% | +5.8% |
+| prob_13 | +13.7% | — |
+| prob_17 | −9.3% (guard rejects) | — |
+
+The gain shrinks as the search deepens (mostly "shallow-search recovery"), but does
+not vanish, and the SP is a cheap (~3 s) final step.
+
+**Integrated** (Z2-aware SP over the cached AABB pieces + best-of full-objective
+guard → adopt only if the true objective improves). Deterministic ON-vs-OFF net
+(E=2000): **prob_13 −12.9%**, prob_3/5/15/17 unchanged (guard → ON ≤ OFF always).
+prob_13 is a genuine global recombination the one-block-at-a-time search cannot
+reach. Time cost: an ~18% recombine reserve (mostly idle post-convergence time on
+preference instances; real on large tardy instances). Env-gated `SOLVER_NORECOMB`.
+
+---
+
 ## Net outcome of this cycle
 - Kept: **best-of build fix** (32429ca), **deterministic eval mode** (7d63719),
-  guided-ILS as an env-gated option (default unchanged).
-- Rejected as defaults: set-partitioning recombination (H1/H2), (j,ids) cache,
-  guided/mix ILS.
-- **Pattern:** all four advanced-search tweaks are mixed/marginal — the core design
+  **Z2-aware SP recombination** (adopted, default-on, guarded), guided-ILS as an
+  env-gated option (default unchanged).
+- Rejected as defaults: Z1+Z3-only recombination, (j,ids) cache, guided/mix ILS.
+- **Pattern (before the Z2 fix):** the first three single-axis tweaks were mixed/
+  marginal — the core design
   (disjoint packing + best-of polygon + ILS) already captured the gains, and the
   search is robust + high-variance, so single-axis tweaks help some instances and
   hurt others. Low-hanging fruit is exhausted; further gains need a different angle

@@ -24,6 +24,16 @@ try:
 except Exception:                       # pragma: no cover
     _HAS_SHAPELY = False
 
+try:
+    from ortools.sat.python import cp_model as _cp_model
+    _HAS_ORTOOLS = True
+except Exception:                       # pragma: no cover
+    _HAS_ORTOOLS = False
+
+# Pool of (bay, block_set) -> AABB tardiness pieces seen during the search, for the
+# Z2-aware set-partitioning recombination final step.
+_POOL: dict = {}
+
 # Cache of local (reference-anchored) footprints, keyed by (id(block_data), orient).
 # A block placed at (x,y) has world footprint = translate(local, x, y), so the
 # expensive polygon build happens once per (block, orientation) and translation is
@@ -305,6 +315,7 @@ def eval_obj1(prob, assign, cache):
             T, _ = extract_tardiness(prob, j, solve_bay(prob, j, list(ids)))
             cache[ids] = T
             perbay[j] = T
+        _POOL[(j, ids)] = perbay[j]   # record (bay, set) piece for recombination
         obj1 += perbay[j]
     return obj1, perbay
 
@@ -533,6 +544,97 @@ def _ils(prob, best, best_tot, cache, deadline, rng):
     return best, best_tot
 
 
+def _bestof_obj(prob, assign, deadline=None):
+    """Full objective on the same per-bay best-of(AABB, polygon) basis the final
+    build uses: w1·Σ min(T_aabb,T_poly) + w2·Z2 + w3·Z3. Used to guard the
+    recombination adoption (Pareto-safe)."""
+    w = prob["weights"]
+    m = len(prob["bays"])
+    o1 = 0.0
+    for j in range(m):
+        ids = [i for i, a in assign.items() if a == j]
+        if not ids:
+            continue
+        Ta, _ = extract_tardiness(prob, j, solve_bay(prob, j, ids, poly=False))
+        Tp, _ = extract_tardiness(prob, j, solve_bay(prob, j, ids, poly=True, deadline=deadline))
+        o1 += min(Ta, Tp)
+    o2, o3 = obj23(prob, assign)
+    return w["w1"] * o1 + w["w2"] * o2 + w["w3"] * o3
+
+
+def _recombine(prob, best, deadline):
+    """Z2-aware set-partitioning recombination of the cached (bay,set) pieces.
+    Local search moves one block at a time and cannot recombine whole bay-pieces
+    across solutions; the MIP can. column cost = w1·tardiness + w3·preference,
+    global term = w2·Z2 (min-max, linearized). Hinted with the incumbent (so a
+    time cut-off still yields >= incumbent on the MIP metric) and adopted only if
+    the full best-of objective actually improves -- Pareto-safe."""
+    if not _HAS_ORTOOLS:
+        return best
+    blocks = prob["blocks"]
+    bays = prob["bays"]
+    m = len(bays)
+    n = len(blocks)
+    w = prob["weights"]
+    SCALE = 100
+    cols = [(j, ids, T) for (j, ids), T in _POOL.items() if ids]
+    if not cols:
+        return best
+    model = _cp_model.CpModel()
+    x = [model.NewBoolVar(f"c{k}") for k in range(len(cols))]
+    by_block = [[] for _ in range(n)]
+    by_bay = [[] for _ in range(m)]
+    wl = []
+    cost = []
+    for k, (j, ids, T) in enumerate(cols):
+        for i in ids:
+            by_block[i].append(k)
+        by_bay[j].append(k)
+        wl.append(sum(blocks[i]["workload"] for i in ids))
+        pl = sum(max(blocks[i]["bay_preferences"]) - blocks[i]["bay_preferences"][j] for i in ids)
+        cost.append(int(SCALE * (w["w1"] * T + w["w3"] * pl)))
+    for i in range(n):
+        if not by_block[i]:
+            return best
+        model.Add(sum(x[k] for k in by_block[i]) == 1)
+    for j in range(m):
+        if by_bay[j]:
+            model.Add(sum(x[k] for k in by_bay[j]) <= 1)
+    obj = sum(x[k] * cost[k] for k in range(len(cols)))
+    if m >= 2:
+        areas = [b["width"] * b["height"] for b in bays]; avg = sum(areas) / m
+        cj = [round(avg / areas[j] * SCALE) for j in range(m)]
+        sload = [sum(cj[j] * wl[k] * x[k] for k in by_bay[j]) for j in range(m)]
+        M = model.NewIntVar(0, 10 ** 12, "M")     # = SCALE * Z2
+        for a in range(m):
+            for b in range(m):
+                if a != b:
+                    model.Add(M >= sload[a] - sload[b])
+        obj = obj + w["w2"] * M
+    model.Minimize(obj)
+    inc = {(j, tuple(sorted(i for i in best if best[i] == j)))
+           for j in range(m) if any(best[i] == j for i in best)}
+    for k, (j, ids, T) in enumerate(cols):
+        model.AddHint(x[k], 1 if (j, ids) in inc else 0)
+    cp = _cp_model.CpSolver()
+    cp.parameters.max_time_in_seconds = max(0.5, (deadline - time.time()) * 0.5)
+    cp.parameters.num_search_workers = 4
+    st = cp.Solve(model)
+    if st not in (_cp_model.OPTIMAL, _cp_model.FEASIBLE):
+        return best
+    A = {}
+    for k, (j, ids, T) in enumerate(cols):
+        if cp.Value(x[k]) == 1:
+            for i in ids:
+                A[i] = j
+    if len(A) != n:
+        return best
+    # best-of full-objective guard (Pareto-safe): adopt only if A truly improves.
+    if _bestof_obj(prob, A, deadline) < _bestof_obj(prob, best, deadline) - 1e-9:
+        return A
+    return best
+
+
 # --------------------------------------------------------------------------- #
 # solution assembly + top-level solve
 # --------------------------------------------------------------------------- #
@@ -577,9 +679,11 @@ def framework_solve(prob, timelimit):
     returns a feasible solution."""
     global _EVALS, _EVAL_LIMIT
     _EVALS = 0
+    _POOL.clear()
     t0 = time.time()
     cache = {}
     safety = max(2.0, timelimit * 0.04)
+    recomb_on = _HAS_ORTOOLS and not os.environ.get("SOLVER_NORECOMB")
 
     # EVALUATION mode (reproducible, deterministic): stop the searches by candidate-
     # evaluation count, run the full polygon build, and let the harness report wall
@@ -598,19 +702,25 @@ def framework_solve(prob, timelimit):
             bt, best_seed = tot, a
     best, best_tot = best_seed, bt
 
+    recomb_deadline = None
     if _EVAL_LIMIT is not None:
         # eval-count thresholds (cumulative): improved 40%, local 70%, ILS 100%.
         imp_dl, bas_dl, ils_dl = _EVAL_LIMIT * 0.4, _EVAL_LIMIT * 0.7, _EVAL_LIMIT
         poly_deadline = None    # full deterministic polygon build
+        if recomb_on:
+            recomb_deadline = None   # set just before the call (wall-clock cap)
     else:
         # The exact polygon final-build only recovers PACKING-driven tardiness, so
         # reserve time for it only when tardiness is in play; preference-only
         # instances (a seed already reaches obj1=0) give the budget to search.
         poly_build_reserve = (max(6.0, timelimit * 0.30) if min_o1 > 1e-9
                               else max(1.0, timelimit * 0.04))
-        search_total = max(0.0, timelimit - poly_build_reserve - safety)
+        # the recombination (MIP + best-of guard) needs ~2 builds' worth of time
+        recombine_reserve = max(5.0, timelimit * 0.18) if recomb_on else 0.0
+        search_total = max(0.0, timelimit - poly_build_reserve - recombine_reserve - safety)
         imp_dl = t0 + search_total * 0.5
         bas_dl = ils_dl = t0 + search_total
+        recomb_deadline = t0 + search_total + recombine_reserve
         poly_deadline = t0 + timelimit - safety
 
     try:
@@ -625,6 +735,12 @@ def framework_solve(prob, timelimit):
         if not os.environ.get("SOLVER_NOILS"):
             best, best_tot = _ils(prob, best, best_tot, cache,
                                   deadline=ils_dl, rng=random.Random(0))
+        # Z2-aware set-partitioning recombination of the cached pieces (guarded;
+        # adopted only if the full best-of objective improves). SOLVER_NORECOMB=1
+        # disables it.
+        if recomb_on:
+            rdl = recomb_deadline if recomb_deadline is not None else (time.time() + 30.0)
+            best = _recombine(prob, best, deadline=rdl)
     except Exception:
         pass  # keep the best feasible assignment found so far
 
