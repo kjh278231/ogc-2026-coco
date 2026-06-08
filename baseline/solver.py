@@ -30,6 +30,31 @@ except Exception:                       # pragma: no cover
 # a cheap affine transform.
 _LOCAL_FP: dict = {}
 
+# Search budgeting. By default the searches stop on a wall-clock DEADLINE (used for
+# the real submission). For reproducible A/B EVALUATION, set SOLVER_MAX_EVALS: the
+# searches then stop after a fixed number of candidate evaluations (total_obj calls)
+# -> deterministic, no wall-clock variance. In that mode each `deadline` argument is
+# reinterpreted as an eval-count threshold. Either way the harness should report the
+# wall-clock time per problem (eval mode does NOT bound time -- it must be watched).
+_EVALS = 0
+_EVAL_LIMIT = None
+
+
+def _now():
+    return _EVALS if _EVAL_LIMIT is not None else time.time()
+
+
+def _within(x):
+    """True while the search may continue. `x` is a time (default) or, in eval
+    mode, an eval-count threshold."""
+    return (_EVALS < x) if _EVAL_LIMIT is not None else (time.time() < x)
+
+
+def _mid(deadline):
+    """Halfway point between now and `deadline`, in the active unit (time/evals)."""
+    n = _now()
+    return n + (deadline - n) * 0.5
+
 
 # --------------------------------------------------------------------------- #
 # geometry helpers
@@ -285,6 +310,8 @@ def eval_obj1(prob, assign, cache):
 
 
 def total_obj(prob, assign, cache):
+    global _EVALS
+    _EVALS += 1
     obj1, perbay = eval_obj1(prob, assign, cache)
     obj2, obj3 = obj23(prob, assign)
     w = prob["weights"]
@@ -349,12 +376,12 @@ def local_search(prob, assign, cache, deadline):
     best = dict(assign)
     best_tot, perbay = total_obj(prob, best, cache)
     improved = True
-    while improved and time.time() < deadline:
+    while improved and _within(deadline):
         improved = False
         tardy = [j for j in range(m) if perbay.get(j, 0) > 0]
         movers = [i for i in best if best[i] in tardy]
         for i in movers:
-            if time.time() >= deadline:
+            if not _within(deadline):
                 break
             for j in range(m):
                 if j == best[i] or not fits(blocks[i], prob["bays"][j]):
@@ -374,8 +401,6 @@ def improved_search(prob, cache, deadline):
     """Two-phase hill climb from the best heuristic seed. Phase 1 (first half):
     movers in tardy bays (Z1) + the max-(u*load) bay (Z2). Phase 2: also move
     blocks off their preferred bay (Z3), tried preference-first."""
-    t0 = time.time()
-    span = max(0.0, deadline - t0)
     blocks = prob["blocks"]
     bays = prob["bays"]
     m = len(bays)
@@ -395,7 +420,7 @@ def improved_search(prob, cache, deadline):
     def hillclimb(include_offpref, sub_deadline):
         nonlocal cur, cur_tot, perbay
         improved = True
-        while improved and time.time() < sub_deadline:
+        while improved and _within(sub_deadline):
             improved = False
             loads = [0.0] * m
             for i, j in cur.items():
@@ -405,7 +430,7 @@ def improved_search(prob, cache, deadline):
             movers = [i for i in cur if cur[i] in tardy or cur[i] == maxload
                       or (include_offpref and cur[i] != pref_bay[i])]
             for i in movers:
-                if time.time() >= sub_deadline:
+                if not _within(sub_deadline):
                     break
                 targets = sorted((j for j in range(m)
                                   if j != cur[i] and fits(blocks[i], bays[j])),
@@ -420,7 +445,7 @@ def improved_search(prob, cache, deadline):
                         improved = True
                         break
 
-    hillclimb(False, t0 + span * 0.5)
+    hillclimb(False, _mid(deadline))
     hillclimb(True, deadline)
     return cur, cur_tot
 
@@ -439,7 +464,7 @@ def _climb(prob, assign, cache, deadline):
     cur = dict(assign)
     cur_tot, perbay = total_obj(prob, cur, cache)
     improved = True
-    while improved and time.time() < deadline:
+    while improved and _within(deadline):
         improved = False
         loads = [0.0] * m
         for i, j in cur.items():
@@ -449,7 +474,7 @@ def _climb(prob, assign, cache, deadline):
         movers = [i for i in cur if cur[i] in tardy or cur[i] == maxload
                   or cur[i] != pref_bay[i]]
         for i in movers:
-            if time.time() >= deadline:
+            if not _within(deadline):
                 break
             targets = sorted((j for j in range(m)
                               if j != cur[i] and fits(blocks[i], bays[j])),
@@ -474,7 +499,7 @@ def _ils(prob, best, best_tot, cache, deadline, rng):
     bays = prob["bays"]
     m = len(bays)
     ids = list(best)
-    while time.time() < deadline:
+    while _within(deadline):
         k = rng.randint(2, 5)
         cand = dict(best)
         for _ in range(k):
@@ -530,9 +555,17 @@ def framework_solve(prob, timelimit):
     """Time-managed solve. Reserves a build margin, splits the rest between the
     two-phase search and the focused search (best-of, shared cache), and always
     returns a feasible solution."""
+    global _EVALS, _EVAL_LIMIT
+    _EVALS = 0
     t0 = time.time()
     cache = {}
     safety = max(2.0, timelimit * 0.04)
+
+    # EVALUATION mode (reproducible, deterministic): stop the searches by candidate-
+    # evaluation count, run the full polygon build, and let the harness report wall
+    # time. Default (submission) mode is wall-clock time-managed.
+    max_evals = os.environ.get("SOLVER_MAX_EVALS")
+    _EVAL_LIMIT = int(max_evals) if max_evals else None
 
     # best heuristic as a guaranteed feasible floor; also detect whether tardiness
     # is even in play (min obj1 over seeds).
@@ -545,28 +578,34 @@ def framework_solve(prob, timelimit):
             bt, best_seed = tot, a
     best, best_tot = best_seed, bt
 
-    # The exact polygon final-build only recovers PACKING-driven tardiness, so
-    # reserve time for it only when tardiness is in play; preference-only instances
-    # (some seed already reaches obj1=0) give nearly all the budget to search.
-    poly_build_reserve = (max(6.0, timelimit * 0.30) if min_o1 > 1e-9
-                          else max(1.0, timelimit * 0.04))
-    search_total = max(0.0, timelimit - poly_build_reserve - safety)
-    half = search_total * 0.5
+    if _EVAL_LIMIT is not None:
+        # eval-count thresholds (cumulative): improved 40%, local 70%, ILS 100%.
+        imp_dl, bas_dl, ils_dl = _EVAL_LIMIT * 0.4, _EVAL_LIMIT * 0.7, _EVAL_LIMIT
+        poly_deadline = None    # full deterministic polygon build
+    else:
+        # The exact polygon final-build only recovers PACKING-driven tardiness, so
+        # reserve time for it only when tardiness is in play; preference-only
+        # instances (a seed already reaches obj1=0) give the budget to search.
+        poly_build_reserve = (max(6.0, timelimit * 0.30) if min_o1 > 1e-9
+                              else max(1.0, timelimit * 0.04))
+        search_total = max(0.0, timelimit - poly_build_reserve - safety)
+        imp_dl = t0 + search_total * 0.5
+        bas_dl = ils_dl = t0 + search_total
+        poly_deadline = t0 + timelimit - safety
 
     try:
-        asg_imp, t_imp = improved_search(prob, cache, deadline=t0 + half)
+        asg_imp, t_imp = improved_search(prob, cache, deadline=imp_dl)
         if t_imp < best_tot:
             best, best_tot = asg_imp, t_imp
-        asg_bas, t_bas = local_search(prob, best_seed, cache, deadline=t0 + search_total)
+        asg_bas, t_bas = local_search(prob, best_seed, cache, deadline=bas_dl)
         if t_bas < best_tot:
             best, best_tot = asg_bas, t_bas
-        # iterated local search on whatever time the main search left unused
+        # iterated local search on whatever budget the main search left unused
         # (SOLVER_NOILS=1 disables it -- ablation baseline)
         if not os.environ.get("SOLVER_NOILS"):
             best, best_tot = _ils(prob, best, best_tot, cache,
-                                  deadline=t0 + search_total, rng=random.Random(0))
+                                  deadline=ils_dl, rng=random.Random(0))
     except Exception:
         pass  # keep the best feasible assignment found so far
 
-    poly_deadline = t0 + timelimit - safety
     return build_solution(prob, best, poly_deadline=poly_deadline)
