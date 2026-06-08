@@ -498,13 +498,21 @@ def build_solution(prob, assign, poly_deadline=None):
         ids = [i for i, a in assign.items() if a == j]
         if not ids:
             continue
-        # exact polygon packing for the final solution (recovers packing-driven
-        # tardiness), bounded by poly_deadline; AABB-only past it.
-        # SOLVER_NOPOLY=1 disables it (AABB-only ablation baseline).
+        # Always pack AABB; ALSO pack with polygon escalation when there's time,
+        # and keep whichever gives lower tardiness. Polygon packing is usually
+        # better (recovers packing-driven tardiness) but is greedy -- placing one
+        # block earlier can push others out -- so it can occasionally be WORSE than
+        # AABB; best-of guarantees we never lose to the AABB packing.
+        # SOLVER_NOPOLY=1 forces AABB-only (ablation baseline).
+        placed = solve_bay(prob, j, ids, poly=False)
+        T_aabb, exits = extract_tardiness(prob, j, placed)
         use_poly = ((poly_deadline is None or time.time() < poly_deadline)
                     and not os.environ.get("SOLVER_NOPOLY"))
-        placed = solve_bay(prob, j, ids, poly=use_poly, deadline=poly_deadline)
-        _, exits = extract_tardiness(prob, j, placed)
+        if use_poly:
+            placed_p = solve_bay(prob, j, ids, poly=True, deadline=poly_deadline)
+            T_poly, exits_p = extract_tardiness(prob, j, placed_p)
+            if T_poly < T_aabb:
+                placed, exits = placed_p, exits_p
         for p in placed:
             en, ex = int(p["entry"]), int(exits[p["id"]])
             ops.setdefault(str(ex), []).append({"type": "EXIT", "block_id": p["id"], "bay_id": j})
