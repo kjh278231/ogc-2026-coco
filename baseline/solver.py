@@ -86,14 +86,24 @@ def _mid(deadline):
 # --------------------------------------------------------------------------- #
 # geometry helpers
 # --------------------------------------------------------------------------- #
+# Cache of the raw-vertex AABB per (id(block_data), orient); pure function of the
+# shape, cleared per solve (id()-keyed) like the other caches.
+_ORIENT_BBOX: dict = {}
+
+
 def orient_bbox(bd, o):
-    xs = []
-    ys = []
-    for layer in bd["shape"][o]["layers"]:
-        for x, y in layer:
-            xs.append(x)
-            ys.append(y)
-    return min(xs), min(ys), max(xs), max(ys)
+    key = (id(bd), o)
+    box = _ORIENT_BBOX.get(key)
+    if box is None:
+        xs = []
+        ys = []
+        for layer in bd["shape"][o]["layers"]:
+            for x, y in layer:
+                xs.append(x)
+                ys.append(y)
+        box = (min(xs), min(ys), max(xs), max(ys))
+        _ORIENT_BBOX[key] = box
+    return box
 
 
 def fits(bd, bay):
@@ -130,11 +140,14 @@ def find_slot(bay, present_objs, overlap_objs, bd, bid, W, H, step):
         for y in range(y_start, y_end + 1, step):
             cy0 = lby0 + y
             cy1 = lby1 + y
+            # the y-half of the overlap test is constant across the row, so filter
+            # to the y-overlapping boxes once; the inner x-loop then checks only the
+            # x-half over a much smaller list (usually empty => whole row is free).
+            row = [b for b in ov_boxes if cy0 < b[3] and b[1] < cy1]
             for x in range(x_start, x_end + 1, step):
                 cx0 = lbx0 + x
                 cx1 = lbx1 + x
-                if any(cx0 < b[2] and b[0] < cx1 and cy0 < b[3] and b[1] < cy1
-                       for b in ov_boxes):
+                if any(cx0 < b[2] and b[0] < cx1 for b in row):
                     continue
                 cand = Block(block_id=bid, block_data=bd, x=x, y=y, orient_idx=o)
                 if check_entry(bay, present_objs, cand):  # boundary only now
@@ -185,14 +198,15 @@ def find_slot_poly(bay, present_objs, ov_boxfps, bd, bid, W, H, step):
         for y in range(y_start, y_end + 1, step):
             cy0 = lby0 + y
             cy1 = lby1 + y
+            # y-half of the AABB pre-filter is constant across the row; filter once.
+            row = [bf for bf in ov_boxfps if cy0 < bf[0][3] and bf[0][1] < cy1]
             for x in range(x_start, x_end + 1, step):
                 cx0 = lbx0 + x
                 cx1 = lbx1 + x
                 cfp = None
                 bad = False
-                for (ob_box, ob_fp) in ov_boxfps:
-                    if not (cx0 < ob_box[2] and ob_box[0] < cx1
-                            and cy0 < ob_box[3] and ob_box[1] < cy1):
+                for (ob_box, ob_fp) in row:
+                    if not (cx0 < ob_box[2] and ob_box[0] < cx1):
                         continue  # AABBs disjoint => footprints disjoint
                     if cfp is None:
                         cfp = _block_footprint(bd, x, y, o)
@@ -714,6 +728,7 @@ def framework_solve(prob, timelimit):
     # one problem per process, but clearing per solve makes reuse safe and is cheap.
     _LOCAL_FP.clear()
     _LOCAL_BOX.clear()
+    _ORIENT_BBOX.clear()
     t0 = time.time()
     cache = {}
     safety = max(2.0, timelimit * 0.04)

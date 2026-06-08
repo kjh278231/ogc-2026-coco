@@ -216,6 +216,18 @@ with them, the 5-in-one-process run matches the clean per-process numbers exactl
 **Lesson:** `id()`-keyed module caches must be cleared per solve, and perf A/Bs that loop
 instances in one process can contaminate — prefer one process per instance (or clear).
 
+**Follow-up (kept, marginal): row-level y-prefilter + `orient_bbox` memoization.** With Block
+construction gone, the re-profile (prob_13, 243→60.9 s) put the overlap scan at ~64% *by call
+volume*. Hoisted the constant y-half of the AABB test to a per-row prefilter
+(`row=[b for b in ov_boxes if y-overlap]`, inner x-loop then checks only the x-half) in
+`find_slot`/`find_slot_poly`, plus an `orient_bbox` cache. Behavior-invariant (all 20 objectives
+bit-identical at E=300) but only **−4%** aggregate (226.1→216.9 s): each call is already near
+the CPython floor — `any()` short-circuits on the first overlapping box and first-fit returns
+early, so hoisting trades comparisons for a per-row list-build and ~breaks even in the
+dense-overlap case. Kept (free, zero-risk). **Conclusion: the AABB inner loop is at the
+pure-Python floor; the next real lever is vectorizing the candidate scan (numpy) or a Cython/C
+port — out of scope for "pure-Python, no structural change."**
+
 ---
 
 ## Net outcome of this cycle
