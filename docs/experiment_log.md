@@ -149,11 +149,82 @@ preference instances; real on large tardy instances). Env-gated `SOLVER_NORECOMB
 
 ---
 
+## H2 re-experiment — search → recombine → search loop (REJECTED, removed)
+
+With Z2-aware recombination now working (H1 adopted), H2's premise was retested:
+split the ILS budget, insert a recombine mid-search, then run a 2nd ILS pass from the
+recombined basin (which local moves cannot reach), and keep the final recombine.
+Implemented behind `SOLVER_RECOMB_LOOP=1` so it is a fair same-E A/B vs the single
+final recombine (same total ILS eval budget, same final recombine).
+
+Deterministic eval mode, E=2000, same code state (off = current default = one
+uninterrupted ILS + one final recombine):
+
+| instance | single recombine (off) | loop (on) | Δ |
+|---|---|---|---|
+| prob_5 | 114,920 | 114,920 | 0% |
+| prob_13 | 1,006,433 | 1,106,122 | **+9.9% worse** |
+| prob_17 | 240,624 | 380,540 | **+57.7% worse** |
+
+**Verdict: rejected, loop block removed.** It loses even on prob_13 — the one instance
+recombination most helps — and badly regresses prob_17. Unlike guided-ILS (kept
+env-gated because it had big wins on *some* instances), H2 has **no winning instance**,
+so there is no instance-adaptive value to retain. Mechanism: recombining mid-search
+commits the assignment to a basin built from a *thin* pool, then burns the remaining
+budget re-searching there; the final guard only protects the recombine step, not the
+budget-split. Running ILS uninterrupted to deep convergence and recombining the *rich*
+final pool **once** is strictly better. (`SOLVER_RECOMB_LOOP` removed.)
+
+---
+
+## find_slot Block-construction elimination (ADOPTED — behavior-invariant ~3.7x speedup)
+
+Profile-first (`cProfile`, prob_13 E=800, 243 s): `find_slot` is **97%** of cumulative
+time — and the cost is **not** CP-SAT (0.99 s, 0.4%) or shapely polygon (~3%) but the
+per-candidate `Block(...)` construction + `bounding_rect()` recompute inside the AABB
+admission loop (`Block.__post_init__` 36.4M calls, `_bounding_box` 36.6M, `_translate_verts`
+66.2M). Every candidate `(x,y)` built a full `Block` *before* the cheap overlap test
+rejected most of them.
+
+**Fix:** the candidate AABB equals the origin-anchored box translated by `(x,y)` (the
+bbox is translation-equivariant), so compute it by arithmetic and build a `Block` only
+for the few candidates that survive the overlap reject and need the (boundary)
+`check_entry`. The origin box is cached per `(block, orientation)` in `_LOCAL_BOX`. Same
+transform applied to `find_slot_poly`.
+
+Validation — deterministic eval mode E=600, **one instance per process**
+(= production: the sandbox runs one problem per invocation):
+
+| instance | before obj | after obj | Δ | time before→after |
+|---|---|---|---|---|
+| prob_3 | 139,270 | 139,270 | **0 (bit-identical)** | 21.4 → 5.8 s |
+| prob_17 | 1,072,146 | 1,072,146 | **0** | 22.0 → 6.5 s |
+| prob_20 | 3,825,949 | 3,825,949 | **0** | 221.7 → 56.8 s |
+
+Behavior-invariant (objective identical), **~3.4–3.9x faster** → ~3–4x more evals in
+the same wall-clock. The eval-mode oracle is what makes "invariant" provable: a true
+speedup must return the *same* objective at the same E, only lower wall time.
+
+**Cache-contamination footgun (found + fixed).** `_LOCAL_FP` and the new `_LOCAL_BOX`
+are keyed by `id(block_data)` and were never cleared, so a *multi-instance-in-one-process*
+harness can reuse a freed address → stale box → wrong packing. This surfaced as a false
+"divergence" in a 5-in-one-process run (prob_17 1,072,146→928,792, prob_20
+3,825,949→4,413,356) and was the first sign — chased down to the cache, not the refactor.
+`framework_solve` now clears both (like `_POOL`). Production runs one problem per process
+so was never affected, but the clears make any benchmark/multi-instance driver correct;
+with them, the 5-in-one-process run matches the clean per-process numbers exactly.
+**Lesson:** `id()`-keyed module caches must be cleared per solve, and perf A/Bs that loop
+instances in one process can contaminate — prefer one process per instance (or clear).
+
+---
+
 ## Net outcome of this cycle
 - Kept: **best-of build fix** (32429ca), **deterministic eval mode** (7d63719),
   **Z2-aware SP recombination** (adopted, default-on, guarded), guided-ILS as an
-  env-gated option (default unchanged).
-- Rejected as defaults: Z1+Z3-only recombination, (j,ids) cache, guided/mix ILS.
+  env-gated option (default unchanged), **`find_slot` Block-construction elimination**
+  (behavior-invariant ~3.7x speedup + `id()`-keyed cache clears).
+- Rejected as defaults: Z1+Z3-only recombination, (j,ids) cache, guided/mix ILS,
+  H2 search→recombine→search loop (removed — worse on every instance tested).
 - **Pattern (before the Z2 fix):** the first three single-axis tweaks were mixed/
   marginal — the core design
   (disjoint packing + best-of polygon + ILS) already captured the gains, and the

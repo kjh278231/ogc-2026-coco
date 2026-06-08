@@ -40,6 +40,23 @@ _POOL: dict = {}
 # a cheap affine transform.
 _LOCAL_FP: dict = {}
 
+# Cache of the local (origin-anchored) AABB, keyed by (id(block_data), orient).
+# A block placed at (x,y) has bounding_rect = this box translated by (x,y) (the
+# bbox is translation-equivariant), so the candidate box in the inner packing
+# loop is pure arithmetic -- no Block need be built per candidate just to read it.
+_LOCAL_BOX: dict = {}
+
+
+def _local_box(bd, o):
+    """Origin-anchored AABB (min_x,min_y,max_x,max_y) for (block, orientation).
+    Equals Block(bd, 0, 0, o).bounding_rect(); cached per (block, orientation)."""
+    key = (id(bd), o)
+    box = _LOCAL_BOX.get(key)
+    if box is None:
+        box = Block(block_id=-1, block_data=bd, x=0, y=0, orient_idx=o).bounding_rect()
+        _LOCAL_BOX[key] = box
+    return box
+
 # Search budgeting. By default the searches stop on a wall-clock DEADLINE (used for
 # the real submission). For reproducible A/B EVALUATION, set SOLVER_MAX_EVALS: the
 # searches then stop after a fixed number of candidate evaluations (total_obj calls)
@@ -106,13 +123,20 @@ def find_slot(bay, present_objs, overlap_objs, bd, bid, W, H, step):
         y_end = math.floor(H - mxy)
         if x_end < x_start or y_end < y_start:
             continue
+        # candidate box = origin box translated by (x, y); arithmetic only, so we
+        # build a Block only for the few candidates that survive the overlap reject
+        # and need the (boundary) crane-entry check.
+        lbx0, lby0, lbx1, lby1 = _local_box(bd, o)
         for y in range(y_start, y_end + 1, step):
+            cy0 = lby0 + y
+            cy1 = lby1 + y
             for x in range(x_start, x_end + 1, step):
-                cand = Block(block_id=bid, block_data=bd, x=x, y=y, orient_idx=o)
-                cb = cand.bounding_rect()
-                if any(cb[0] < b[2] and b[0] < cb[2] and cb[1] < b[3] and b[1] < cb[3]
+                cx0 = lbx0 + x
+                cx1 = lbx1 + x
+                if any(cx0 < b[2] and b[0] < cx1 and cy0 < b[3] and b[1] < cy1
                        for b in ov_boxes):
                     continue
+                cand = Block(block_id=bid, block_data=bd, x=x, y=y, orient_idx=o)
                 if check_entry(bay, present_objs, cand):  # boundary only now
                     continue
                 return (x, y, o)
@@ -157,15 +181,18 @@ def find_slot_poly(bay, present_objs, ov_boxfps, bd, bid, W, H, step):
         y_end = math.floor(H - mxy)
         if x_end < x_start or y_end < y_start:
             continue
+        lbx0, lby0, lbx1, lby1 = _local_box(bd, o)  # candidate box = this + (x, y)
         for y in range(y_start, y_end + 1, step):
+            cy0 = lby0 + y
+            cy1 = lby1 + y
             for x in range(x_start, x_end + 1, step):
-                cand = Block(block_id=bid, block_data=bd, x=x, y=y, orient_idx=o)
-                cb = cand.bounding_rect()
+                cx0 = lbx0 + x
+                cx1 = lbx1 + x
                 cfp = None
                 bad = False
                 for (ob_box, ob_fp) in ov_boxfps:
-                    if not (cb[0] < ob_box[2] and ob_box[0] < cb[2]
-                            and cb[1] < ob_box[3] and ob_box[1] < cb[3]):
+                    if not (cx0 < ob_box[2] and ob_box[0] < cx1
+                            and cy0 < ob_box[3] and ob_box[1] < cy1):
                         continue  # AABBs disjoint => footprints disjoint
                     if cfp is None:
                         cfp = _block_footprint(bd, x, y, o)
@@ -174,6 +201,7 @@ def find_slot_poly(bay, present_objs, ov_boxfps, bd, bid, W, H, step):
                         break
                 if bad:
                     continue
+                cand = Block(block_id=bid, block_data=bd, x=x, y=y, orient_idx=o)
                 if check_entry(bay, present_objs, cand):
                     continue
                 return (x, y, o)
@@ -680,6 +708,12 @@ def framework_solve(prob, timelimit):
     global _EVALS, _EVAL_LIMIT
     _EVALS = 0
     _POOL.clear()
+    # These caches are keyed by id(block_data); a later instance's block dict can
+    # reuse a freed address, so a stale entry would corrupt packing if the module
+    # is reused across problems (multi-instance harness/benchmark). Production runs
+    # one problem per process, but clearing per solve makes reuse safe and is cheap.
+    _LOCAL_FP.clear()
+    _LOCAL_BOX.clear()
     t0 = time.time()
     cache = {}
     safety = max(2.0, timelimit * 0.04)
@@ -732,9 +766,16 @@ def framework_solve(prob, timelimit):
             best, best_tot = asg_bas, t_bas
         # iterated local search on whatever budget the main search left unused
         # (SOLVER_NOILS=1 disables it -- ablation baseline)
-        if not os.environ.get("SOLVER_NOILS"):
-            best, best_tot = _ils(prob, best, best_tot, cache,
-                                  deadline=ils_dl, rng=random.Random(0))
+        rng = random.Random(0)
+        do_ils = not os.environ.get("SOLVER_NOILS")
+        # H2 (search -> recombine -> search loop) was tested and rejected: splitting the
+        # ILS budget to recombine mid-search commits the assignment to a basin built from
+        # a thin pool, then burns the rest re-searching there. Deterministic E=2000 A/B
+        # vs the single final recombine: prob_13 +9.9%, prob_17 +57.7%, prob_5 0% -- worse
+        # everywhere, no winning instance. One uninterrupted ILS + one final recombine of
+        # the rich pool is strictly better. See docs/experiment_log.md.
+        if do_ils:
+            best, best_tot = _ils(prob, best, best_tot, cache, deadline=ils_dl, rng=rng)
         # Z2-aware set-partitioning recombination of the cached pieces (guarded;
         # adopted only if the full best-of objective improves). SOLVER_NORECOMB=1
         # disables it.

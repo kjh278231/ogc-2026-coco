@@ -27,10 +27,19 @@ The central scientific finding: **the crane constraint, which makes the problem 
 fearsome, can be *designed away*.** Because bay area utilization is only ~0.3–0.4,
 forbidding footprint (projection) overlap costs nothing yet guarantees crane-trap-free
 extraction, collapsing a coupled placement+extraction problem into a standard crane-free
-2-D dynamic packing. Two measured refinements close most of the remaining gap: **adaptive
+2-D dynamic packing. Three measured refinements close most of the remaining gap: **adaptive
 polygon escalation** (the exact footprint check, used only where the cheap AABB check
-fails) recovers *packing-driven* tardiness, and **iterated local search on idle time**
-escapes the assignment local minima that cause residual preference penalty.
+fails) recovers *packing-driven* tardiness; **iterated local search on idle time** escapes
+the assignment local minima that cause residual preference penalty; and a **Z2-aware
+set-partitioning recombination** as a guarded final step reaches global re-assignments the
+one-block-at-a-time search cannot (prob_13 −12.9%, never worse elsewhere).
+
+A second contribution is methodological: the search is wall-clock-deadline driven and
+high-variance, so we built a **deterministic eval-count mode** that makes every A/B
+reproducible. Several plausible refinements were tested rigorously under it and *rejected*
+(Z1+Z3-only recombination, a "search→recombine→search" loop, an obj-cache key change), and
+one was kept only as an env-gated option (signal-guided ILS) — the negative results are
+reported alongside the positive ones.
 
 ---
 
@@ -143,8 +152,43 @@ ILS-gain ≥ 0 on every instance); it improves preference instances by ~27–28%
 local minima. The earlier failure and this success differ only in *where* the operators
 are applied — the time-bound analysis identified the right place.
 
+### 3.7 Z2-aware set-partitioning recombination (guarded global move)
+ILS moves one block between bays at a time, so it cannot reach assignments that require a
+**simultaneous** multi-bay reshuffle. To reach those, the search caches every
+`(bay, block-set) → tardiness` piece it evaluates, then solves an exact-cover
+(set-partitioning) MIP over those pieces (OR-Tools CP-SAT) that recombines them into a new
+global assignment. The first version of this idea was **dropped**: the MIP minimized only
+`Z1+Z3`, so adopting its solution blew up imbalance (`Z2` −81% on the full objective on
+prob_5), and its one apparent win turned out to be a build-bug artifact (§4). It works once
+two things are fixed: **(a)** `Z2` is put *into* the MIP — the min-max imbalance is
+linearized (`M ≥ |u_j·load_j − u_k·load_k|` for every bay pair, objective `+ w2·M`) and the
+column cost uses the same **best-of(AABB, polygon)** tardiness as the final build; and
+**(b)** the recombined assignment is adopted only if a **best-of full-objective guard**
+confirms the true score improved (otherwise the incumbent is kept). This makes it a cheap
+(~3 s) **never-regress** final step. Net deterministic effect (eval mode, on-vs-off):
+**prob_13 −12.9%** — a genuine global recombination the local search cannot reach —
+prob_3/5/15/17 unchanged (guard → on ≤ off always). It is the only refinement that touches
+`Z2` directly. Env-gated `SOLVER_NORECOMB`; depends on OR-Tools.
+
+> Implementation note (side-effect of MIP solve time): the recombine runs under a deadline
+> and reverts to the incumbent if it does not finish, so it never threatens time-compliance
+> even though MIP solve time is in principle unpredictable. A faster MIP (e.g. Gurobi) would
+> reach the *same* optimum faster, not a better one — the ceiling is pool diversity, not
+> solver speed (measured: pool 2623→4507 on prob_17 gave 0 extra gain).
+
+### 3.8 Measurement reliability — deterministic eval-count mode
+Diagnosing the refinements above repeatedly hit a methodological wall: the search terminates
+on a **wall-clock deadline**, so two runs at the same time limit land in different local
+minima, and single-run A/Bs at different (or even equal) budgets produced *confounded*
+conclusions more than once. We added an evaluation mode (`SOLVER_MAX_EVALS=E`) that stops
+each search after `E` candidate evaluations instead of a time deadline → **fully
+deterministic** (two runs bit-identical). The submission default is unchanged (wall-clock);
+eval mode is only for judging a modification, and since it does not bound wall time the
+harness reports per-problem wall time so a fixed iteration count cannot silently blow the
+budget. Every adopt/reject decision in §3.7 and §4.1 was made under this mode.
+
 > TODO: pseudocode for `solve_bay` (adaptive disjoint admission), the assignment search,
-> and `_ils`.
+> `_ils`, and the recombination MIP.
 
 ---
 
@@ -195,6 +239,29 @@ prob_20 (`Z1`=113, a genuinely hard packing) and the high-preference prob_13/pro
 (both *beat* the old baseline). I.e. given adequate time the framework dominates the prior
 best-of; the competition's per-problem limit (minutes–30 min) supplies that time.
 
+### 4.1 Advanced-search experiments — what was kept, what was rejected
+After the core framework was in place we tested four ideas for squeezing more out of the
+search, **all judged under the deterministic eval mode (§3.8)**. Full chronology and per-
+instance tables are in `docs/experiment_log.md`; the summary:
+
+| idea | verdict | evidence (deterministic, equal budget) |
+|---|---|---|
+| **Z2-aware SP recombination** (§3.7) | **adopted, default-on, guarded** | prob_13 −12.9%, others unchanged (guard never regresses) |
+| Z1+Z3-only recombination | rejected | blew up `Z2` (prob_5 −81% full obj); apparent win was a build bug |
+| signal-guided ILS destroy | **env-gated only** (`SOLVER_GUIDED`) | instance-dependent: prob_15 −14.8% / prob_5 −9.2% **but** prob_17 +32%, prob_18 +20% — no clean win |
+| `(bay, set)` obj-cache key | rejected | identical on 4/5 instances, +7.5% on one — the correct key did not help |
+| **H2** search→recombine→search loop | rejected, removed | worse on every instance: prob_13 +9.9%, prob_17 +57.7%, prob_5 0% |
+
+**Pattern.** Once the core design (disjoint packing + best-of polygon + ILS) captured the
+gains, single-axis tweaks were mixed/marginal — the search is robust and high-variance, so a
+tweak helps some instances and hurts others. The two ideas that *did* survive are the ones
+that either change the search's reach in a **guarded** way (recombination — a global move the
+local search structurally cannot make, adopted only when the true objective improves) or are
+kept **off by default** for possible instance-adaptive use (guided ILS). The decisive tool
+was the eval mode itself: it reversed two earlier wall-clock "findings" (a (j,ids) win and an
+H1-dropped verdict) that were pure variance, and let H1 be correctly *revived* once the
+dropped reason — `Z2` — was addressed.
+
 ---
 
 ## 5. Discussion, Limitations, Future Work
@@ -210,9 +277,11 @@ near-lexicographic — drive `Z1` to 0, then minimize `Z3`, and `Z2` barely matt
 refinements (§3.5, §3.6) attack the two large buckets directly.
 
 **Limitations / next steps.**
-- **`Z2` under-served.** The search optimizes total objective but can let `Z2` (imbalance)
-  rise on `Z1`=0, small-`Z3` instances (prob_3). Low weight, but a cheap `Z2`-aware tie-break
-  would remove the one regression.
+- **`Z2` partly addressed.** The local search optimizes the total objective but, moving one
+  block at a time, can let `Z2` (imbalance) rise on `Z1`=0, small-`Z3` instances (prob_3).
+  The Z2-aware recombination (§3.7) now attacks this directly *when* a beneficial global
+  reshuffle exists (and never regresses when it does not), but a cheap `Z2`-aware tie-break
+  inside the local moves would still help the cases the MIP's pool does not cover.
 - **One genuinely hard packing** (prob_20, `Z1`=113): adaptive polygon recovers only part
   within the budget; a faster polygon check (footprint caching) or a tighter assignment
   would help.
