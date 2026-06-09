@@ -66,6 +66,14 @@ def _local_box(bd, o):
 _EVALS = 0
 _EVAL_LIMIT = None
 
+# Anytime incumbent trace (analysis only, env-gated by SOLVER_TRACE; default off so the
+# submission path is untouched). When on, total_obj appends (elapsed_s, objective) each
+# time it sees a new global best, giving an x=time / y=objective curve for one run.
+_TRACE: list = []
+_TRACE_ON = False
+_TRACE_T0 = 0.0
+_TRACE_BEST = float("inf")
+
 
 def _now():
     return _EVALS if _EVAL_LIMIT is not None else time.time()
@@ -363,12 +371,15 @@ def eval_obj1(prob, assign, cache):
 
 
 def total_obj(prob, assign, cache):
-    global _EVALS
+    global _EVALS, _TRACE_BEST
     _EVALS += 1
     obj1, perbay = eval_obj1(prob, assign, cache)
     obj2, obj3 = obj23(prob, assign)
     w = prob["weights"]
     tot = w["w1"] * obj1 + w["w2"] * obj2 + w["w3"] * obj3
+    if _TRACE_ON and tot < _TRACE_BEST:
+        _TRACE_BEST = tot
+        _TRACE.append((time.time() - _TRACE_T0, tot))
     return tot, perbay
 
 
@@ -680,28 +691,46 @@ def _recombine(prob, best, deadline):
 # --------------------------------------------------------------------------- #
 # solution assembly + top-level solve
 # --------------------------------------------------------------------------- #
-def build_solution(prob, assign, poly_deadline=None):
+def _score_and_pack(prob, assign, poly_deadline=None):
+    """Best-of(AABB, polygon) full objective AND the exact packed bays used for that
+    score, in a single pass. The polygon pack is the same work build_solution needs
+    to emit the solution, so scoring a final candidate and building the winner from
+    it share that cost (no double packing). Returns (total, packed) where
+    packed = [(bay, placed, exits), ...]. Mirrors build_solution's per-bay logic:
+
+    Always pack AABB; ALSO pack with polygon escalation when there's time, and keep
+    whichever gives lower tardiness. Polygon packing is usually better (recovers
+    packing-driven tardiness) but is greedy -- placing one block earlier can push
+    others out -- so it can occasionally be WORSE than AABB; best-of guarantees we
+    never lose to the AABB packing. SOLVER_NOPOLY=1 forces AABB-only (ablation)."""
+    w = prob["weights"]
     m = len(prob["bays"])
-    ops = {}
+    obj1 = 0.0
+    packed = []
     for j in range(m):
         ids = [i for i, a in assign.items() if a == j]
         if not ids:
             continue
-        # Always pack AABB; ALSO pack with polygon escalation when there's time,
-        # and keep whichever gives lower tardiness. Polygon packing is usually
-        # better (recovers packing-driven tardiness) but is greedy -- placing one
-        # block earlier can push others out -- so it can occasionally be WORSE than
-        # AABB; best-of guarantees we never lose to the AABB packing.
-        # SOLVER_NOPOLY=1 forces AABB-only (ablation baseline).
         placed = solve_bay(prob, j, ids, poly=False)
-        T_aabb, exits = extract_tardiness(prob, j, placed)
+        T_best, exits = extract_tardiness(prob, j, placed)
         use_poly = ((poly_deadline is None or time.time() < poly_deadline)
                     and not os.environ.get("SOLVER_NOPOLY"))
         if use_poly:
             placed_p = solve_bay(prob, j, ids, poly=True, deadline=poly_deadline)
             T_poly, exits_p = extract_tardiness(prob, j, placed_p)
-            if T_poly < T_aabb:
-                placed, exits = placed_p, exits_p
+            if T_poly < T_best:
+                placed, exits, T_best = placed_p, exits_p, T_poly
+        packed.append((j, placed, exits))
+        obj1 += T_best
+    obj2, obj3 = obj23(prob, assign)
+    total = w["w1"] * obj1 + w["w2"] * obj2 + w["w3"] * obj3
+    return total, packed
+
+
+def _solution_from_packed(packed):
+    """Assemble the submission operations from already-packed bays."""
+    ops = {}
+    for j, placed, exits in packed:
         for p in placed:
             en, ex = int(p["entry"]), int(exits[p["id"]])
             ops.setdefault(str(ex), []).append({"type": "EXIT", "block_id": p["id"], "bay_id": j})
@@ -715,11 +744,16 @@ def build_solution(prob, assign, poly_deadline=None):
     return {"operations": ops}
 
 
+def build_solution(prob, assign, poly_deadline=None):
+    _, packed = _score_and_pack(prob, assign, poly_deadline=poly_deadline)
+    return _solution_from_packed(packed)
+
+
 def framework_solve(prob, timelimit):
     """Time-managed solve. Reserves a build margin, splits the rest between the
     two-phase search and the focused search (best-of, shared cache), and always
     returns a feasible solution."""
-    global _EVALS, _EVAL_LIMIT
+    global _EVALS, _EVAL_LIMIT, _TRACE_ON, _TRACE_T0, _TRACE_BEST
     _EVALS = 0
     _POOL.clear()
     # These caches are keyed by id(block_data); a later instance's block dict can
@@ -730,6 +764,11 @@ def framework_solve(prob, timelimit):
     _LOCAL_BOX.clear()
     _ORIENT_BBOX.clear()
     t0 = time.time()
+    _TRACE_ON = bool(os.environ.get("SOLVER_TRACE"))
+    if _TRACE_ON:
+        _TRACE.clear()
+        _TRACE_T0 = t0
+        _TRACE_BEST = float("inf")
     cache = {}
     safety = max(2.0, timelimit * 0.04)
     recomb_on = _HAS_ORTOOLS and not os.environ.get("SOLVER_NORECOMB")
@@ -762,16 +801,25 @@ def framework_solve(prob, timelimit):
         # The exact polygon final-build only recovers PACKING-driven tardiness, so
         # reserve time for it only when tardiness is in play; preference-only
         # instances (a seed already reaches obj1=0) give the budget to search.
-        poly_build_reserve = (max(6.0, timelimit * 0.30) if min_o1 > 1e-9
+        # Reserve fractions/floors are env-tunable for budget-allocation A/B (default
+        # unchanged). Calibrated pre-speedup; the find_slot work made build/recombine
+        # ~4x faster, so these may now over-reserve and starve the search. See
+        # docs/experiment_log.md.
+        poly_frac = float(os.environ.get("SOLVER_POLY_RESERVE", "0.30"))
+        recomb_frac = float(os.environ.get("SOLVER_RECOMB_RESERVE", "0.18"))
+        poly_floor = float(os.environ.get("SOLVER_POLY_FLOOR", "6.0"))
+        recomb_floor = float(os.environ.get("SOLVER_RECOMB_FLOOR", "5.0"))
+        poly_build_reserve = (max(poly_floor, timelimit * poly_frac) if min_o1 > 1e-9
                               else max(1.0, timelimit * 0.04))
         # the recombination (MIP + best-of guard) needs ~2 builds' worth of time
-        recombine_reserve = max(5.0, timelimit * 0.18) if recomb_on else 0.0
+        recombine_reserve = max(recomb_floor, timelimit * recomb_frac) if recomb_on else 0.0
         search_total = max(0.0, timelimit - poly_build_reserve - recombine_reserve - safety)
         imp_dl = t0 + search_total * 0.5
         bas_dl = ils_dl = t0 + search_total
         recomb_deadline = t0 + search_total + recombine_reserve
         poly_deadline = t0 + timelimit - safety
 
+    base_incumbent = None
     try:
         asg_imp, t_imp = improved_search(prob, cache, deadline=imp_dl)
         if t_imp < best_tot:
@@ -779,6 +827,12 @@ def framework_solve(prob, timelimit):
         asg_bas, t_bas = local_search(prob, best_seed, cache, deadline=bas_dl)
         if t_bas < best_tot:
             best, best_tot = asg_bas, t_bas
+        # Snapshot the pre-ILS incumbent. The proxy-driven tail below (ILS, and the
+        # recombination guarded only against ITS input) optimises the AABB proxy
+        # (total_obj), but the submission is built on the best-of(AABB, polygon)
+        # objective. A proxy gain can be a true-objective regression, so this trusted
+        # incumbent anchors the final true-objective guard (after the searches).
+        base_incumbent = dict(best)
         # iterated local search on whatever budget the main search left unused
         # (SOLVER_NOILS=1 disables it -- ablation baseline)
         rng = random.Random(0)
@@ -799,5 +853,24 @@ def framework_solve(prob, timelimit):
             best = _recombine(prob, best, deadline=rdl)
     except Exception:
         pass  # keep the best feasible assignment found so far
+
+    # Final true-objective guard (Guarded methodology). The proxy-driven tail (ILS +
+    # recombination) may have moved `best` off `base_incumbent` on the AABB proxy
+    # only. Score BOTH on the real best-of objective with _score_and_pack and submit
+    # whichever is truly better, reusing the winner's packing so it is emitted without
+    # re-packing. `best` is scored first so the candidate we would have shipped keeps
+    # the full polygon budget; base_incumbent is then scored under the same deadline,
+    # so the guard overrides only when base_incumbent is genuinely better -- never a
+    # regression vs the previous behaviour. Skipped when best == base_incumbent (the
+    # common case: no proxy move stuck), keeping that path bit-identical.
+    if base_incumbent is not None and best != base_incumbent:
+        try:
+            cand_obj, cand_packed = _score_and_pack(prob, best, poly_deadline=poly_deadline)
+            base_obj, base_packed = _score_and_pack(prob, base_incumbent, poly_deadline=poly_deadline)
+            if base_obj < cand_obj - 1e-9:
+                return _solution_from_packed(base_packed)
+            return _solution_from_packed(cand_packed)
+        except Exception:
+            pass  # any failure: fall through to the standard build of `best`
 
     return build_solution(prob, best, poly_deadline=poly_deadline)
