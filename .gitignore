@@ -14,3 +14,10 @@ alg_tester/example/benchmark/
 # Reference papers / large local artifacts
 2606.03303v2.pdf
 *-latest-*.zip
+
+# Claude Code scratch / local experiment artifacts
+.claude/scratch/
+
+# Submission build artifacts (regenerable from submission/)
+/myalgorithm.zip
+/submission_bridge.zip

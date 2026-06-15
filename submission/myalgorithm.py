@@ -1,9 +1,12 @@
-# myalgorithm.py -- OGC 2026 submission entry point.
+# myalgorithm.py -- OGC 2026 submission entry point (BRIDGE solver).
+#
+# BRIDGE = Bay-decomposed Recombining Iterated-search with Disjoint-footprint
+#          admission and Guarded Escalating-polygon packing.
 #
 # Framework: assignment search scored by a per-bay footprint-disjoint admission
-# packer (crane extraction is free by construction since no two co-resident blocks
-# share a footprint, affordable because bay area utilisation is low). Time-managed
-# to respect `timelimit`; always returns a feasible solution.
+# packer (crane extraction is free by construction since no two co-resident
+# blocks share a footprint, affordable because bay area utilisation is low).
+# Time-managed to respect `timelimit`; always returns a feasible solution.
 # See docs/technical_report.md and docs/methodology.md.
 
 
@@ -14,10 +17,6 @@ def algorithm(prob_info, timelimit=60):
     `timelimit`: wall-clock budget in seconds.
     Returns a solution dict {"operations": {...}}.
     """
-    import os
-    if os.environ.get("OGC_ALGO", "").lower() in {"cover", "covering", "third"}:
-        import covering_solver
-        return covering_solver.covering_solve(prob_info, timelimit)
     import solver
     try:
         return solver.framework_solve(prob_info, timelimit)
