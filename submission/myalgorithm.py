@@ -11,6 +11,11 @@
 #   - SOLVER_NUMBA       : numba-jit the AABB candidate scan and the mask overlap test
 #                          (behavior-invariant ~1.5x speedup; falls back to pure Python if
 #                          numba is unavailable).
+#   - SOLVER_MASK_PREPARE: shapely.prepare the buffer before the per-cell point-membership
+#                          test in the mask build (~92% of build cost) -> ~4.5x that step,
+#                          BIT-IDENTICAL mask (feasibility untouched). At a fixed eval count
+#                          the objective is unchanged; the freed wall time becomes more
+#                          search at the fixed timelimit.
 #   - SOLVER_UNIFIED_ILS : one unified ILS loop (perturb -> best-of(climb, local) -> accept)
 #                          replaces the improved->local->ILS pipeline so the perturbation
 #                          loop gets the whole post-init budget instead of ~0s (legacy ILS
@@ -40,6 +45,7 @@ def algorithm(prob_info, timelimit=60):
     os.environ.setdefault("SOLVER_NUMBA", "1")
     os.environ.setdefault("SOLVER_UNIFIED_ILS", "1")
     os.environ.setdefault("SOLVER_UNIFIED_INIT_FRAC", "0.6")
+    os.environ.setdefault("SOLVER_MASK_PREPARE", "1")
     import solver
     try:
         return solver.framework_solve(prob_info, timelimit)
