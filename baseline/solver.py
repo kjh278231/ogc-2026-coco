@@ -76,6 +76,50 @@ if _HAS_NUMBA:
             y += step
         return -1, -1
 
+    @_njit(cache=True)
+    def _masks_overlap_u64(a_rows, ay, a_h, a_words, b_rows, by, b_h, b_words, dx):
+        """uint64-packed equivalent of masks_overlap: returns the SAME boolean as the
+        pure-Python big-int version, faster (no per-row Python loop). a_rows/b_rows are
+        (h, words) uint64 arrays; ay/by = world y of row 0; dx = ax - bx (column shift)."""
+        y0 = ay if ay > by else by
+        ya = ay + a_h
+        yb = by + b_h
+        y1 = ya if ya < yb else yb
+        if y0 >= y1:
+            return False
+        if dx >= 0:
+            ws = dx // 64
+            bs = dx % 64
+            for gy in range(y0, y1):
+                ra = gy - ay
+                rb = gy - by
+                for w in range(a_words):
+                    bw = w + ws
+                    if bw >= b_words:
+                        break
+                    shifted = b_rows[rb, bw] >> bs
+                    if bs != 0 and bw + 1 < b_words:
+                        shifted = shifted | (b_rows[rb, bw + 1] << (64 - bs))
+                    if a_rows[ra, w] & shifted:
+                        return True
+        else:
+            dxx = -dx
+            ws = dxx // 64
+            bs = dxx % 64
+            for gy in range(y0, y1):
+                ra = gy - ay
+                rb = gy - by
+                for w in range(b_words):
+                    aw = w + ws
+                    if aw >= a_words:
+                        break
+                    shifted = a_rows[ra, aw] >> bs
+                    if bs != 0 and aw + 1 < a_words:
+                        shifted = shifted | (a_rows[ra, aw + 1] << (64 - bs))
+                    if b_rows[rb, w] & shifted:
+                        return True
+        return False
+
 # Pool of (bay, block_set) -> AABB tardiness pieces seen during the search, for the
 # Z2-aware set-partitioning recombination final step.
 _POOL: dict = {}
@@ -279,15 +323,18 @@ _MASK_R_SEARCH = int(os.environ.get("SOLVER_MASK_SEARCH_R", "8"))
 
 
 class MaskProxy:
-    __slots__ = ("R", "ix0", "iy0", "width_bits", "height_rows", "rows")
+    __slots__ = ("R", "ix0", "iy0", "width_bits", "height_rows", "rows",
+                 "width_words", "rows_u64")
 
-    def __init__(self, R, ix0, iy0, width_bits, height_rows, rows):
+    def __init__(self, R, ix0, iy0, width_bits, height_rows, rows, width_words, rows_u64):
         self.R = R
         self.ix0 = ix0            # local grid x offset (cell index of bit 0 of each row)
         self.iy0 = iy0            # local grid y offset (cell index of rows[0])
         self.width_bits = width_bits
         self.height_rows = height_rows
         self.rows = rows          # tuple[int]: row bitsets, bit k = cell (ix0 + k)
+        self.width_words = width_words   # uint64 words/row (for the numba overlap test)
+        self.rows_u64 = rows_u64         # (height_rows, width_words) uint64 packing of rows
 
 
 def _local_mask(bd, o, R):
@@ -303,7 +350,7 @@ def _local_mask(bd, o, R):
         return m
     fp = _local_footprint(bd, o)
     if fp is None or fp.is_empty:
-        m = MaskProxy(R, 0, 0, 0, 0, ())
+        m = MaskProxy(R, 0, 0, 0, 0, (), 0, _np.zeros((0, 0), dtype=_np.uint64))
         _LOCAL_MASK[key] = m
         return m
     d = math.sqrt(2.0) / (2.0 * R) + 1e-9
@@ -330,7 +377,15 @@ def _local_mask(bd, o, R):
         for k in _np.nonzero(inside[r])[0]:
             rb |= (1 << int(k))
         rows.append(rb)
-    m = MaskProxy(R, ix0, iy0, width_bits, height_rows, tuple(rows))
+    # uint64 packing of the same rows for the numba overlap test (bit-identical content)
+    width_words = (width_bits + 63) // 64
+    rows_u64 = _np.zeros((height_rows, width_words), dtype=_np.uint64)
+    _m64 = (1 << 64) - 1
+    for r in range(height_rows):
+        rb = rows[r]
+        for w in range(width_words):
+            rows_u64[r, w] = (rb >> (64 * w)) & _m64
+    m = MaskProxy(R, ix0, iy0, width_bits, height_rows, tuple(rows), width_words, rows_u64)
     _LOCAL_MASK[key] = m
     return m
 
@@ -338,7 +393,12 @@ def _local_mask(bd, o, R):
 def masks_overlap(a, ax, ay, b, bx, by):
     """True iff supercover masks a, b overlap, given their WORLD grid offsets
     (ax, ay) and (bx, by) (= local ix0/iy0 + placement*R). Row bitsets aligned by an
-    integer column shift dx = ax - bx."""
+    integer column shift dx = ax - bx. When SOLVER_NUMBA is on, dispatch to the
+    uint64-packed numba version (same boolean, no per-row Python loop)."""
+    if _NUMBA_ON and a.width_words and b.width_words:
+        return bool(_masks_overlap_u64(
+            a.rows_u64, ay, a.height_rows, a.width_words,
+            b.rows_u64, by, b.height_rows, b.width_words, ax - bx))
     y0 = max(ay, by)
     y1 = min(ay + a.height_rows, by + b.height_rows)
     if y0 >= y1:
@@ -660,13 +720,18 @@ def a_pref_capped(prob, cap_factor=1.15):
 # --------------------------------------------------------------------------- #
 # searches (deadline-driven; only accept improving moves)
 # --------------------------------------------------------------------------- #
-def local_search(prob, assign, cache, deadline):
-    """Focused hill climb: move blocks out of tardy bays (first improvement)."""
+def local_search(prob, assign, cache, deadline, patience=None):
+    """Focused hill climb: move blocks out of tardy bays (first improvement).
+    With `patience` set (unified ILS loop), stop after that many CONSECUTIVE
+    non-improving candidate evaluations -- a timing-independent convergence stop --
+    keeping `deadline` only as a hard safety cap. patience=None preserves the legacy
+    behaviour exactly (deadline-driven full-sweep convergence)."""
     m = len(prob["bays"])
     blocks = prob["blocks"]
     best = dict(assign)
     best_tot, perbay = total_obj(prob, best, cache)
     improved = True
+    noimp = 0
     while improved and _within(deadline):
         improved = False
         tardy = [j for j in range(m) if perbay.get(j, 0) > 0]
@@ -684,7 +749,12 @@ def local_search(prob, assign, cache, deadline):
                     best, best_tot = trial, tot
                     _, perbay = total_obj(prob, best, cache)
                     improved = True
+                    noimp = 0
                     break
+                elif patience is not None:
+                    noimp += 1
+                    if noimp >= patience:
+                        return best, best_tot
     return best, best_tot
 
 
@@ -741,9 +811,12 @@ def improved_search(prob, cache, deadline):
     return cur, cur_tot
 
 
-def _climb(prob, assign, cache, deadline):
+def _climb(prob, assign, cache, deadline, patience=None):
     """Hill climb to convergence-or-deadline: move blocks in tardy bays (Z1), the
-    max-(u*load) bay (Z2), or off their preferred bay (Z3); targets preference-first."""
+    max-(u*load) bay (Z2), or off their preferred bay (Z3); targets preference-first.
+    With `patience` set (unified ILS loop), stop after that many CONSECUTIVE
+    non-improving candidate evaluations (timing-independent convergence stop),
+    `deadline` kept only as a hard safety cap. patience=None == legacy behaviour."""
     blocks = prob["blocks"]
     bays = prob["bays"]
     m = len(bays)
@@ -755,6 +828,7 @@ def _climb(prob, assign, cache, deadline):
     cur = dict(assign)
     cur_tot, perbay = total_obj(prob, cur, cache)
     improved = True
+    noimp = 0
     while improved and _within(deadline):
         improved = False
         loads = [0.0] * m
@@ -778,46 +852,57 @@ def _climb(prob, assign, cache, deadline):
                     cur, cur_tot = trial, tot
                     _, perbay = total_obj(prob, cur, cache)
                     improved = True
+                    noimp = 0
                     break
+                elif patience is not None:
+                    noimp += 1
+                    if noimp >= patience:
+                        return cur, cur_tot
     return cur, cur_tot
 
 
-def _ils(prob, best, best_tot, cache, deadline, rng):
-    """Iterated local search on the IDLE budget left after the main search converges.
-    Perturb the incumbent by re-homing a few blocks, re-optimise, keep the global
-    best. Default destroy is random; SOLVER_GUIDED=1 destroys *contributing* blocks
-    (in a tardy bay [Z1], the max-(u*load) bay [Z2], or off their preferred bay
-    [Z3]) -- repair stays randomized for diversity."""
+def _perturb(prob, best, cache, rng):
+    """One ILS kick: re-home k in [2,5] blocks (random repair). With SOLVER_GUIDED,
+    DESTROY contributing blocks -- in a tardy bay [Z1], the max-(u*load) bay [Z2], or
+    off their preferred bay [Z3]; 'mix' uses guided on 50% of kicks. Returns the
+    perturbed assignment. (rng call sequence identical to the previous inline version.)"""
     blocks = prob["blocks"]
     bays = prob["bays"]
     m = len(bays)
     ids = list(best)
+    k = rng.randint(2, 5)
+    cand = dict(best)
     guided = os.environ.get("SOLVER_GUIDED")   # "1"=always guided, "mix"=50/50
-    if guided:
+    use_g = guided and (guided != "mix" or rng.random() < 0.5)
+    if use_g:
         areas = [b["width"] * b["height"] for b in bays]
         u = [sum(areas) / m / a for a in areas]
         pref_bay = {i: max(range(m), key=lambda j: blocks[i]["bay_preferences"][j])
                     for i in range(len(blocks))}
+        _, perbay = total_obj(prob, best, cache)
+        loads = [0.0] * m
+        for i, j in best.items():
+            loads[j] += blocks[i]["workload"]
+        maxload = max(range(m), key=lambda j: u[j] * loads[j])
+        tardy = {j for j in range(m) if perbay.get(j, 0) > 0}
+        pool = [i for i in ids if best[i] in tardy or best[i] == maxload
+                or best[i] != pref_bay[i]]
+        chosen = rng.sample(pool, min(k, len(pool))) if pool else rng.sample(ids, min(k, len(ids)))
+    else:
+        chosen = [rng.choice(ids) for _ in range(k)]
+    for i in chosen:
+        opts = [j for j in range(m) if j != cand[i] and fits(blocks[i], bays[j])]
+        if opts:
+            cand[i] = rng.choice(opts)
+    return cand
+
+
+def _ils(prob, best, best_tot, cache, deadline, rng):
+    """Iterated local search on the IDLE budget left after the main search converges:
+    perturb the incumbent (see _perturb) and re-optimise (_climb), keeping the global
+    best. SOLVER_GUIDED steers the perturbation; repair stays randomized for diversity."""
     while _within(deadline):
-        k = rng.randint(2, 5)
-        cand = dict(best)
-        use_g = guided and (guided != "mix" or rng.random() < 0.5)
-        if use_g:
-            _, perbay = total_obj(prob, best, cache)
-            loads = [0.0] * m
-            for i, j in best.items():
-                loads[j] += blocks[i]["workload"]
-            maxload = max(range(m), key=lambda j: u[j] * loads[j])
-            tardy = {j for j in range(m) if perbay.get(j, 0) > 0}
-            pool = [i for i in ids if best[i] in tardy or best[i] == maxload
-                    or best[i] != pref_bay[i]]
-            chosen = rng.sample(pool, min(k, len(pool))) if pool else rng.sample(ids, min(k, len(ids)))
-        else:
-            chosen = [rng.choice(ids) for _ in range(k)]
-        for i in chosen:
-            opts = [j for j in range(m) if j != cand[i] and fits(blocks[i], bays[j])]
-            if opts:
-                cand[i] = rng.choice(opts)
+        cand = _perturb(prob, best, cache, rng)
         cur, tot = _climb(prob, cand, cache, deadline)
         if tot < best_tot - 1e-9:
             best, best_tot = cur, tot
@@ -898,7 +983,9 @@ def _recombine(prob, best, deadline):
         model.AddHint(x[k], 1 if (j, ids) in inc else 0)
     cp = _cp_model.CpSolver()
     cp.parameters.max_time_in_seconds = max(0.5, (deadline - time.time()) * 0.5)
-    cp.parameters.num_search_workers = 4
+    # default 4 workers; a parallel portfolio sets SOLVER_CP_WORKERS=1 so N chains use
+    # N*1 cores (no >4-thread over-subscription under the 4-core cpulimit).
+    cp.parameters.num_search_workers = int(os.environ.get("SOLVER_CP_WORKERS", "4"))
     st = cp.Solve(model)
     if st not in (_cp_model.OPTIMAL, _cp_model.FEASIBLE):
         return best
@@ -1090,33 +1177,73 @@ def framework_solve(prob, timelimit):
 
     base_incumbent = None
     try:
-        asg_imp, t_imp = improved_search(prob, cache, deadline=imp_dl)
-        if t_imp < best_tot:
-            best, best_tot = asg_imp, t_imp
-        asg_bas, t_bas = local_search(prob, best_seed, cache, deadline=bas_dl)
-        if t_bas < best_tot:
-            best, best_tot = asg_bas, t_bas
-        # Snapshot the pre-ILS incumbent. The proxy-driven tail below (ILS, and the
-        # recombination guarded only against ITS input) optimises the AABB proxy
-        # (total_obj), but the submission is built on the best-of(AABB, polygon)
-        # objective. A proxy gain can be a true-objective regression, so this trusted
-        # incumbent anchors the final true-objective guard (after the searches).
-        base_incumbent = dict(best)
-        # iterated local search on whatever budget the main search left unused
-        # (SOLVER_NOILS=1 disables it -- ablation baseline)
-        rng = random.Random(0)
-        do_ils = not os.environ.get("SOLVER_NOILS")
-        # H2 (search -> recombine -> search loop) was tested and rejected: splitting the
-        # ILS budget to recombine mid-search commits the assignment to a basin built from
-        # a thin pool, then burns the rest re-searching there. Deterministic E=2000 A/B
-        # vs the single final recombine: prob_13 +9.9%, prob_17 +57.7%, prob_5 0% -- worse
-        # everywhere, no winning instance. One uninterrupted ILS + one final recombine of
-        # the rich pool is strictly better. See docs/experiment_log.md.
-        if do_ils:
-            best, best_tot = _ils(prob, best, best_tot, cache, deadline=ils_dl, rng=rng)
+        if os.environ.get("SOLVER_UNIFIED_ILS"):
+            # Unified ILS (env-gated): one loop replaces the improved->local->ILS
+            # pipeline. First establish an incumbent (improved_search's own-seed climb
+            # plus a local_search from the heuristic seed) within the opening
+            # INIT_FRAC of the search window, snapshot it as the trusted base, then
+            # spend the WHOLE remaining budget perturbing the global best and
+            # re-climbing the kicked point with best-of(_climb [improved's Z1+Z2+Z3
+            # strategy from a start], local_search [Z1-only from a start]). This fixes
+            # the legacy split where ils_dl == end-of-search left ILS ~0s of budget
+            # once local_search consumed the window. Each climb runs to
+            # convergence-or-deadline, so kicks get enough time to settle.
+            init_frac = float(os.environ.get("SOLVER_UNIFIED_INIT_FRAC", "0.4"))
+            # _now() is unit-agnostic (wall seconds, or eval-count in SOLVER_MAX_EVALS
+            # mode) and matches the unit of ils_dl, so the init split is correct in both.
+            search_start = _now()
+            loop_dl = ils_dl
+            init_dl = search_start + max(0.0, loop_dl - search_start) * init_frac
+            asg_imp, t_imp = improved_search(prob, cache, deadline=init_dl)
+            if t_imp < best_tot:
+                best, best_tot = asg_imp, t_imp
+            asg_bas, t_bas = local_search(prob, best_seed, cache, deadline=init_dl)
+            if t_bas < best_tot:
+                best, best_tot = asg_bas, t_bas
+            base_incumbent = dict(best)
+            rng = random.Random(0)
+            # Per-kick inner-climb stop: by default deadline-driven (loop_dl), but
+            # SOLVER_UNIFIED_PATIENCE switches each climb to a timing-independent
+            # "stop after K consecutive non-improving evals" rule (loop_dl stays as the
+            # hard safety cap). Decouples per-kick effort from wall time -> less wall
+            # variance + more kicks when climbs converge early.
+            _pat = os.environ.get("SOLVER_UNIFIED_PATIENCE")
+            patience = int(_pat) if _pat else None
+            while _within(loop_dl):
+                kicked = _perturb(prob, best, cache, rng)
+                c1, t1 = _climb(prob, kicked, cache, loop_dl, patience=patience)
+                c2, t2 = local_search(prob, kicked, cache, loop_dl, patience=patience)
+                cc, ct = (c1, t1) if t1 <= t2 else (c2, t2)
+                if ct < best_tot - 1e-9:
+                    best, best_tot = cc, ct
+        else:
+            asg_imp, t_imp = improved_search(prob, cache, deadline=imp_dl)
+            if t_imp < best_tot:
+                best, best_tot = asg_imp, t_imp
+            asg_bas, t_bas = local_search(prob, best_seed, cache, deadline=bas_dl)
+            if t_bas < best_tot:
+                best, best_tot = asg_bas, t_bas
+            # Snapshot the pre-ILS incumbent. The proxy-driven tail below (ILS, and the
+            # recombination guarded only against ITS input) optimises the AABB proxy
+            # (total_obj), but the submission is built on the best-of(AABB, polygon)
+            # objective. A proxy gain can be a true-objective regression, so this trusted
+            # incumbent anchors the final true-objective guard (after the searches).
+            base_incumbent = dict(best)
+            # iterated local search on whatever budget the main search left unused
+            # (SOLVER_NOILS=1 disables it -- ablation baseline)
+            rng = random.Random(0)
+            do_ils = not os.environ.get("SOLVER_NOILS")
+            # H2 (search -> recombine -> search loop) was tested and rejected: splitting the
+            # ILS budget to recombine mid-search commits the assignment to a basin built from
+            # a thin pool, then burns the rest re-searching there. Deterministic E=2000 A/B
+            # vs the single final recombine: prob_13 +9.9%, prob_17 +57.7%, prob_5 0% -- worse
+            # everywhere, no winning instance. One uninterrupted ILS + one final recombine of
+            # the rich pool is strictly better. See docs/experiment_log.md.
+            if do_ils:
+                best, best_tot = _ils(prob, best, best_tot, cache, deadline=ils_dl, rng=rng)
         # Z2-aware set-partitioning recombination of the cached pieces (guarded;
         # adopted only if the full best-of objective improves). SOLVER_NORECOMB=1
-        # disables it.
+        # disables it. Shared by both search branches.
         if recomb_on:
             rdl = recomb_deadline if recomb_deadline is not None else (time.time() + 30.0)
             best = _recombine(prob, best, deadline=rdl)

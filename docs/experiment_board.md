@@ -13,7 +13,7 @@
 
 | 시작 | 실험 | 설정 | 출력 파일 | 무엇을 결정하나 |
 |---|---|---|---|---|
-| (현재 없음) | | | | |
+| — | (없음) | | | |
 
 ---
 
@@ -36,6 +36,8 @@
 
 ## 🟢 완료 (최근 — 결론 + 링크)
 
+- **통합 ILS 재구조화 (`SOLVER_UNIFIED_ILS`, INIT_FRAC=0.6) — 채택** — 기존 improved→local→ILS 파이프라인을 단일 루프(perturb→best-of(_climb, local_search)→accept)로 대체. legacy는 ils_dl=탐색끝이라 local이 윈도우를 다 쓰면 ILS가 ~0s 굶었음 → unified는 init 60%로 신뢰 incumbent(가드 바닥) 완전수렴 후 나머지 전부를 perturb 루프에 사용. **full-20 wall A/B(T=60): −9.05%, 8승4패8무, 전부 feasible·시간 내, 위험 회귀 없음**(최악 prob_5 +4.9%). 큰 이득 prob_12/6/11 −22~24%. **INIT_FRAC 0.4(−11.4%지만 prob_18 +37% 위험) vs 0.6(−9%, 안전) → 0.6 채택.** **step-count 종료(`SOLVER_UNIFIED_PATIENCE`) 반증**(큰 인스턴스서 완전수렴 우수; prob_5만 P100 도움 → knob만 유지, 미채택). 기본 경로 bit-identical 확인(prob_5/13/17). **→ 제출 기본값 on**(`submission/myalgorithm.py` setdefault). 출력: `.claude/scratch/uwgate/`.
+- **병렬 portfolio R-sweep (8개, T=120)** — best-of(R4,R8,R16) = **−11.1% vs 단일 R8**, 전부 feasible. **최적 R이 instance별 전부 다름**(R4/R8/R16 각각 어디선가 이김, 양방향 큰 스프레드): R16은 fine-geometry(prob_3/6) 승·eval-starved(prob_11/20)서 악화, R4는 그 반대. **prob_3 회귀 R16이 거의 해결, prob_18 R4가 해결.** → R-다양성 portfolio 가치 확실 + adaptive-R 천장(=best-of-R, 예측 불필요·병렬로 직접 달성). → `memory/bitmask-collision-result.md`
 - **numba payoff (wall A/B, T=120)** — 스택 numba off vs on: **합산 −28.5%**, 전부 feasible. **prob_18 회귀 해결+α**(+17.9%→기본보다 −50%, eval-count가 원인 확인), prob_13 −47%, prob_20 −16%. **prob_3만 불변(+0%)** = eval-count 무관 별도 원인. **→ numba 스택 기본 on.** 스택이 eval-제한적이라 속도→objective 전환이 큼(=남은 속도 표적 가치↑). → `memory/bitmask-collision-result.md`
 - **numba `masks_overlap` (uint64 패킹) + find_slot AABB** — `_local_mask`에 uint64 rows 추가, numba `_masks_overlap_u64`, `masks_overlap`이 `SOLVER_NUMBA` 시 dispatch. **behavior-invariant 확정**(big-int vs numba 15000 케이스 R4/8/16 모두 mismatch=0; eval-count obj 완전 동일). 스택 end-to-end **~1.56× 속도**(prob_13 41→26s, prob_20 64→40s). masks_overlap precompute는 미가속(별개 표적). → `memory/bitmask-collision-result.md`
 - **스택 full-20 확인 (채택 관문)** — 현재 기본 vs 스택(mask-search+자동조절 R8) @ T=120: **합산 −40.2%**(9.81M→5.87M), **18승 2패, 전부 feasible.** 회귀 prob_18 +17.9%·prob_3 +11.8%(둘 다 evals 1/4 손실). **→ 채택 확정**(기본값 전환). 역대 최고, default objective를 거의 절반으로. → `memory/bitmask-collision-result.md`

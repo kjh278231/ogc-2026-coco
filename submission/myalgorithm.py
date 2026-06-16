@@ -11,6 +11,13 @@
 #   - SOLVER_NUMBA       : numba-jit the AABB candidate scan and the mask overlap test
 #                          (behavior-invariant ~1.5x speedup; falls back to pure Python if
 #                          numba is unavailable).
+#   - SOLVER_UNIFIED_ILS : one unified ILS loop (perturb -> best-of(climb, local) -> accept)
+#                          replaces the improved->local->ILS pipeline so the perturbation
+#                          loop gets the whole post-init budget instead of ~0s (legacy ILS
+#                          starved once local consumed the window). INIT_FRAC=0.6 reserves
+#                          the opening 60% to fully converge the trusted incumbent (guard
+#                          floor) before perturbing. full-20 wall A/B: -9% net, all feasible,
+#                          no dangerous regression (worst +4.9%).
 #
 # The mask is a SUPERCOVER of the true footprint (mask-disjoint => polygon-disjoint), so
 # feasibility is preserved (validated: 0 false negatives). Time-managed; always returns a
@@ -31,6 +38,8 @@ def algorithm(prob_info, timelimit=60):
     os.environ.setdefault("SOLVER_MASK", "1")
     os.environ.setdefault("SOLVER_ADAPTIVE_RESERVE", "1")
     os.environ.setdefault("SOLVER_NUMBA", "1")
+    os.environ.setdefault("SOLVER_UNIFIED_ILS", "1")
+    os.environ.setdefault("SOLVER_UNIFIED_INIT_FRAC", "0.6")
     import solver
     try:
         return solver.framework_solve(prob_info, timelimit)
