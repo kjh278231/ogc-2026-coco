@@ -320,6 +320,14 @@ _LOCAL_MASK: dict = {}
 # is the separate SOLVER_MASK gate. Default off -> default search path unchanged.
 _MASK_SEARCH = _HAS_SHAPELY and bool(os.environ.get("SOLVER_MASK_SEARCH"))
 _MASK_R_SEARCH = int(os.environ.get("SOLVER_MASK_SEARCH_R", "8"))
+# SOLVER_MASK_PREPARE: shapely.prepare the buffer before the per-cell point-membership
+# test in _local_mask -> ~4.5x faster mask build (the point test is ~92% of build cost),
+# BIT-IDENTICAL mask (0 mismatch validated) so feasibility is untouched. Gated OFF by
+# default: at a fixed eval count the objective is unchanged, but in WALL mode the freed
+# build time lets the search run further -- which is net -4.8% on train BUT exposes the
+# search's non-monotonicity (proxy-drift: prob_12 +38.8%, prob_15 +35.6%). Keep off until
+# the snapshot true-scoring guard makes "more search never hurts"; then flip it on.
+_MASK_PREPARE = _HAS_SHAPELY and bool(os.environ.get("SOLVER_MASK_PREPARE"))
 
 
 class MaskProxy:
@@ -355,6 +363,14 @@ def _local_mask(bd, o, R):
         return m
     d = math.sqrt(2.0) / (2.0 * R) + 1e-9
     buf = fp.buffer(d)
+    # Prepare the buffer once so the per-cell point-membership test below uses GEOS's
+    # indexed representation instead of a full intersects per point. The point-membership
+    # step is ~92% of mask-build cost; prepare cuts it ~78% (4.5x) with BIT-IDENTICAL
+    # results (validated: 0 mismatch over all (block,orient) of prob_13/14/20) -> the mask
+    # is unchanged so the supercover/feasibility guarantee is fully preserved. Gated
+    # (SOLVER_MASK_PREPARE) because the freed wall time amplifies search non-monotonicity.
+    if _MASK_PREPARE:
+        _shapely.prepare(buf)
     minx, miny, maxx, maxy = buf.bounds
     ix0 = math.floor(minx * R) - 1
     iy0 = math.floor(miny * R) - 1
