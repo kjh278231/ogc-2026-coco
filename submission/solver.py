@@ -14,12 +14,14 @@ import time
 import math
 import os
 import random
+import numpy as _np
 from utils import Bay, Block, check_entry, check_exit
 
 try:
     from shapely.geometry import Polygon as _ShapelyPolygon
     from shapely.ops import unary_union as _unary_union
     from shapely.affinity import translate as _translate
+    import shapely as _shapely
     _HAS_SHAPELY = True
 except Exception:                       # pragma: no cover
     _HAS_SHAPELY = False
@@ -29,6 +31,94 @@ try:
     _HAS_ORTOOLS = True
 except Exception:                       # pragma: no cover
     _HAS_ORTOOLS = False
+
+try:
+    from numba import njit as _njit
+    _HAS_NUMBA = True
+except Exception:                       # pragma: no cover
+    _HAS_NUMBA = False
+
+# Optional numba-jitted AABB candidate scan (env-gated by SOLVER_NUMBA; OFF by default so
+# the submission/default path stays bit-identical). The inner overlap loop of find_slot is
+# ~97% of search time; jitting it yields many more candidate evaluations per wall-second.
+# It returns the SAME first bottom-left free (x, y) as the pure-Python loop, so it is
+# behaviour-invariant -- validate with SOLVER_MAX_EVALS (identical objective at the same
+# eval count, only lower wall). Falls back to pure Python if numba is unavailable.
+_NUMBA_ON = _HAS_NUMBA and bool(os.environ.get("SOLVER_NUMBA"))
+
+if _HAS_NUMBA:
+    @_njit(cache=True)
+    def _aabb_scan(boxes, lbx0, lby0, lbx1, lby1, x_start, x_end, y_start, y_end,
+                   step, start_y, start_x):
+        """First bottom-left (x, y) (row-major: y outer, x inner, starting at
+        (start_y, start_x)) whose candidate AABB overlaps no box in `boxes`
+        (shape (K,4) = x0,y0,x1,y1). Returns (-1, -1) if none. Mirrors find_slot's
+        overlap test exactly (same operands/inequalities) so the result is identical."""
+        K = boxes.shape[0]
+        y = start_y
+        x = start_x
+        while y <= y_end:
+            cy0 = lby0 + y
+            cy1 = lby1 + y
+            while x <= x_end:
+                cx0 = lbx0 + x
+                cx1 = lbx1 + x
+                free = True
+                for i in range(K):
+                    if (cx0 < boxes[i, 2] and boxes[i, 0] < cx1
+                            and cy0 < boxes[i, 3] and boxes[i, 1] < cy1):
+                        free = False
+                        break
+                if free:
+                    return x, y
+                x += step
+            x = x_start
+            y += step
+        return -1, -1
+
+    @_njit(cache=True)
+    def _masks_overlap_u64(a_rows, ay, a_h, a_words, b_rows, by, b_h, b_words, dx):
+        """uint64-packed equivalent of masks_overlap: returns the SAME boolean as the
+        pure-Python big-int version, faster (no per-row Python loop). a_rows/b_rows are
+        (h, words) uint64 arrays; ay/by = world y of row 0; dx = ax - bx (column shift)."""
+        y0 = ay if ay > by else by
+        ya = ay + a_h
+        yb = by + b_h
+        y1 = ya if ya < yb else yb
+        if y0 >= y1:
+            return False
+        if dx >= 0:
+            ws = dx // 64
+            bs = dx % 64
+            for gy in range(y0, y1):
+                ra = gy - ay
+                rb = gy - by
+                for w in range(a_words):
+                    bw = w + ws
+                    if bw >= b_words:
+                        break
+                    shifted = b_rows[rb, bw] >> bs
+                    if bs != 0 and bw + 1 < b_words:
+                        shifted = shifted | (b_rows[rb, bw + 1] << (64 - bs))
+                    if a_rows[ra, w] & shifted:
+                        return True
+        else:
+            dxx = -dx
+            ws = dxx // 64
+            bs = dxx % 64
+            for gy in range(y0, y1):
+                ra = gy - ay
+                rb = gy - by
+                for w in range(b_words):
+                    aw = w + ws
+                    if aw >= a_words:
+                        break
+                    shifted = a_rows[ra, aw] >> bs
+                    if bs != 0 and aw + 1 < a_words:
+                        shifted = shifted | (a_rows[ra, aw + 1] << (64 - bs))
+                    if b_rows[rb, w] & shifted:
+                        return True
+        return False
 
 # Pool of (bay, block_set) -> AABB tardiness pieces seen during the search, for the
 # Z2-aware set-partitioning recombination final step.
@@ -132,6 +222,9 @@ def find_slot(bay, present_objs, overlap_objs, bd, bid, W, H, step):
     full-footprint (AABB) disjoint from all temporally-overlapping blocks
     (=> no cross-layer overlap => never crane-trapped)."""
     ov_boxes = [ob.bounding_rect() for ob in overlap_objs]
+    if _NUMBA_ON:
+        boxes_arr = (_np.asarray(ov_boxes, dtype=_np.float64) if ov_boxes
+                     else _np.empty((0, 4), dtype=_np.float64))
     for o in range(len(bd["shape"])):
         mnx, mny, mxx, mxy = orient_bbox(bd, o)
         # integer range: lower=ceil (else min vertex < 0), upper=floor (else > W)
@@ -145,6 +238,27 @@ def find_slot(bay, present_objs, overlap_objs, bd, bid, W, H, step):
         # build a Block only for the few candidates that survive the overlap reject
         # and need the (boundary) crane-entry check.
         lbx0, lby0, lbx1, lby1 = _local_box(bd, o)
+        if _NUMBA_ON:
+            # The jitted scan returns successive first-free candidates in the same
+            # bottom-left (row-major) order; Python runs the rare boundary crane-entry
+            # check and resumes past a rejected candidate, so the chosen (x, y, o) is
+            # identical to the pure-Python loop below -- only faster.
+            sy, sx = y_start, x_start
+            while sy <= y_end:
+                rx, ry = _aabb_scan(boxes_arr, float(lbx0), float(lby0), float(lbx1),
+                                    float(lby1), x_start, x_end, y_start, y_end,
+                                    step, sy, sx)
+                if rx < 0:
+                    break
+                cand = Block(block_id=bid, block_data=bd, x=rx, y=ry, orient_idx=o)
+                if not check_entry(bay, present_objs, cand):
+                    return (rx, ry, o)
+                sx = rx + step
+                sy = ry
+                if sx > x_end:
+                    sx = x_start
+                    sy = ry + step
+            continue
         for y in range(y_start, y_end + 1, step):
             cy0 = lby0 + y
             cy1 = lby1 + y
@@ -189,6 +303,121 @@ def _block_footprint(bd, x, y, o):
     return _translate(loc, x, y) if loc is not None else None
 
 
+# --------------------------------------------------------------------------- #
+# Bitmask collision model (env-gated; see docs/bitmask_collision_design.md).
+# A conservative SUPERCOVER of the polygon footprint on an integer grid (R cells per
+# bay unit): mask-disjoint => polygon-disjoint (never under-rejects -> feasibility is
+# preserved), but tighter than AABB (recovers placements AABB over-rejects). Cheap
+# integer row-bitset overlap test, intended to approach AABB speed while approaching
+# polygon quality. Default path is unchanged until SOLVER_MASK is set.
+# --------------------------------------------------------------------------- #
+_LOCAL_MASK: dict = {}
+
+# Use the supercover mask (instead of AABB) for the SEARCH's per-bay packing/scoring
+# (env SOLVER_MASK_SEARCH). This makes the proxy near-polygon-accurate -> directly
+# attacks proxy-drift (search optimises ~the true objective) and explores tight
+# interlocking placements AABB rejects, at ~3-4x AABB pack cost. The final-build mask
+# is the separate SOLVER_MASK gate. Default off -> default search path unchanged.
+_MASK_SEARCH = _HAS_SHAPELY and bool(os.environ.get("SOLVER_MASK_SEARCH"))
+_MASK_R_SEARCH = int(os.environ.get("SOLVER_MASK_SEARCH_R", "8"))
+
+
+class MaskProxy:
+    __slots__ = ("R", "ix0", "iy0", "width_bits", "height_rows", "rows",
+                 "width_words", "rows_u64")
+
+    def __init__(self, R, ix0, iy0, width_bits, height_rows, rows, width_words, rows_u64):
+        self.R = R
+        self.ix0 = ix0            # local grid x offset (cell index of bit 0 of each row)
+        self.iy0 = iy0            # local grid y offset (cell index of rows[0])
+        self.width_bits = width_bits
+        self.height_rows = height_rows
+        self.rows = rows          # tuple[int]: row bitsets, bit k = cell (ix0 + k)
+        self.width_words = width_words   # uint64 words/row (for the numba overlap test)
+        self.rows_u64 = rows_u64         # (height_rows, width_words) uint64 packing of rows
+
+
+def _local_mask(bd, o, R):
+    """Supercover bitmask of the (block, orientation) union footprint at the local
+    origin, on a grid of R cells per bay unit. A cell is occupied iff its center lies
+    within footprint.buffer(sqrt(2)/(2R)+eps); since every point of a cell is within
+    sqrt(2)/(2R) of its center, this marks EVERY cell the true polygon touches ->
+    mask is a superset of the footprint -> mask-disjoint implies polygon-disjoint.
+    Cached per (block, orientation, R)."""
+    key = (id(bd), o, R)
+    m = _LOCAL_MASK.get(key)
+    if m is not None:
+        return m
+    fp = _local_footprint(bd, o)
+    if fp is None or fp.is_empty:
+        m = MaskProxy(R, 0, 0, 0, 0, (), 0, _np.zeros((0, 0), dtype=_np.uint64))
+        _LOCAL_MASK[key] = m
+        return m
+    d = math.sqrt(2.0) / (2.0 * R) + 1e-9
+    buf = fp.buffer(d)
+    minx, miny, maxx, maxy = buf.bounds
+    ix0 = math.floor(minx * R) - 1
+    iy0 = math.floor(miny * R) - 1
+    ix1 = math.floor(maxx * R) + 1
+    iy1 = math.floor(maxy * R) + 1
+    width_bits = ix1 - ix0 + 1
+    height_rows = iy1 - iy0 + 1
+    gxs = _np.arange(ix0, ix1 + 1)
+    gys = _np.arange(iy0, iy1 + 1)
+    cx = (gxs + 0.5) / R
+    cy = (gys + 0.5) / R
+    CX, CY = _np.meshgrid(cx, cy)                      # (height_rows, width_bits)
+    # intersects (interior OR boundary) is the generous/safe choice: extra occupied
+    # cells only over-reject; a missed cell would be a feasibility-breaking false neg.
+    inside = _shapely.intersects(buf, _shapely.points(CX.ravel(), CY.ravel()))
+    inside = inside.reshape(CY.shape)
+    rows = []
+    for r in range(height_rows):
+        rb = 0
+        for k in _np.nonzero(inside[r])[0]:
+            rb |= (1 << int(k))
+        rows.append(rb)
+    # uint64 packing of the same rows for the numba overlap test (bit-identical content)
+    width_words = (width_bits + 63) // 64
+    rows_u64 = _np.zeros((height_rows, width_words), dtype=_np.uint64)
+    _m64 = (1 << 64) - 1
+    for r in range(height_rows):
+        rb = rows[r]
+        for w in range(width_words):
+            rows_u64[r, w] = (rb >> (64 * w)) & _m64
+    m = MaskProxy(R, ix0, iy0, width_bits, height_rows, tuple(rows), width_words, rows_u64)
+    _LOCAL_MASK[key] = m
+    return m
+
+
+def masks_overlap(a, ax, ay, b, bx, by):
+    """True iff supercover masks a, b overlap, given their WORLD grid offsets
+    (ax, ay) and (bx, by) (= local ix0/iy0 + placement*R). Row bitsets aligned by an
+    integer column shift dx = ax - bx. When SOLVER_NUMBA is on, dispatch to the
+    uint64-packed numba version (same boolean, no per-row Python loop)."""
+    if _NUMBA_ON and a.width_words and b.width_words:
+        return bool(_masks_overlap_u64(
+            a.rows_u64, ay, a.height_rows, a.width_words,
+            b.rows_u64, by, b.height_rows, b.width_words, ax - bx))
+    y0 = max(ay, by)
+    y1 = min(ay + a.height_rows, by + b.height_rows)
+    if y0 >= y1:
+        return False
+    dx = ax - bx
+    arows = a.rows
+    brows = b.rows
+    if dx >= 0:
+        for gy in range(y0, y1):
+            if arows[gy - ay] & (brows[gy - by] >> dx):
+                return True
+    else:
+        ndx = -dx
+        for gy in range(y0, y1):
+            if (arows[gy - ay] >> ndx) & brows[gy - by]:
+                return True
+    return False
+
+
 def find_slot_poly(bay, present_objs, ov_boxfps, bd, bid, W, H, step):
     """Like find_slot but disjointness is the EXACT footprint (polygon), which is
     strictly more permissive than AABB (packs tighter). AABB is used only as a
@@ -230,13 +459,56 @@ def find_slot_poly(bay, present_objs, ov_boxfps, bd, bid, W, H, step):
     return None
 
 
-def solve_bay(prob, j, ids, step=2, tcap=200, poly=False, deadline=None):
+def find_slot_mask(bay, present_objs, ov_boxmasks, bd, bid, W, H, step, R):
+    """Like find_slot_poly but disjointness is the SUPERCOVER bitmask instead of the
+    exact polygon: more permissive than AABB (packs tighter), conservative vs polygon
+    (mask-disjoint => polygon-disjoint, so feasibility holds), and far cheaper than
+    shapely. `ov_boxmasks` = [(bbox, MaskProxy, world_ix0, world_iy0)] of the
+    temporally-overlapping placed blocks; AABB is the cheap pre-filter (AABB-disjoint
+    => footprints disjoint => safe, since footprint <= AABB)."""
+    for o in range(len(bd["shape"])):
+        mnx, mny, mxx, mxy = orient_bbox(bd, o)
+        x_start = math.ceil(max(0.0, -mnx))
+        x_end = math.floor(W - mxx)
+        y_start = math.ceil(max(0.0, -mny))
+        y_end = math.floor(H - mxy)
+        if x_end < x_start or y_end < y_start:
+            continue
+        lbx0, lby0, lbx1, lby1 = _local_box(bd, o)
+        cmask = _local_mask(bd, o, R)
+        for y in range(y_start, y_end + 1, step):
+            cy0 = lby0 + y
+            cy1 = lby1 + y
+            cand_ay = cmask.iy0 + y * R
+            row = [bm for bm in ov_boxmasks if cy0 < bm[0][3] and bm[0][1] < cy1]
+            for x in range(x_start, x_end + 1, step):
+                cx0 = lbx0 + x
+                cx1 = lbx1 + x
+                cand_ax = cmask.ix0 + x * R
+                bad = False
+                for (ob_box, ob_mask, ob_mix0, ob_miy0) in row:
+                    if not (cx0 < ob_box[2] and ob_box[0] < cx1):
+                        continue  # AABBs disjoint => footprints disjoint => safe
+                    if masks_overlap(cmask, cand_ax, cand_ay, ob_mask, ob_mix0, ob_miy0):
+                        bad = True
+                        break
+                if bad:
+                    continue
+                cand = Block(block_id=bid, block_data=bd, x=x, y=y, orient_idx=o)
+                if check_entry(bay, present_objs, cand):
+                    continue
+                return (x, y, o)
+    return None
+
+
+def solve_bay(prob, j, ids, step=2, tcap=200, poly=False, deadline=None, mask=False, mask_R=8):
     """Per-bay footprint-disjoint admission packer. If poly=True, escalate to the
     exact polygon-disjoint check whenever cheap AABB finds no slot at a time t
     (recovers packing-driven tardiness; pays the shapely cost only where needed).
     Once `deadline` (wall-clock) passes, poly escalation is dropped so the pack
     always finishes in bounded time (AABB-only is the validated-feasible floor)."""
     use_poly = poly and _HAS_SHAPELY
+    use_mask = mask and _HAS_SHAPELY
     bays = prob["bays"]
     blocks = prob["blocks"]
     bay = Bay.from_dict(bays[j], j)
@@ -255,7 +527,14 @@ def solve_bay(prob, j, ids, step=2, tcap=200, poly=False, deadline=None):
             overlap = [Block(p["id"], blocks[p["id"]], p["x"], p["y"], p["o"])
                        for p in placed if p["entry"] < t + P and t < p["exit"]]
             slot = find_slot(bay, present, overlap, bd, i, W, H, step)
-            if slot is None and use_poly:
+            if slot is None and use_mask:
+                if deadline is not None and time.time() > deadline:
+                    use_mask = False  # out of time: revert to AABB for the rest
+                else:
+                    ov_boxmasks = [(p["bb"], p["mask"], p["mix0"], p["miy0"]) for p in placed
+                                   if p["entry"] < t + P and t < p["exit"]]
+                    slot = find_slot_mask(bay, present, ov_boxmasks, bd, i, W, H, step, mask_R)
+            elif slot is None and use_poly:
                 if deadline is not None and time.time() > deadline:
                     use_poly = False  # out of time: revert to AABB for the rest
                 else:
@@ -286,7 +565,14 @@ def solve_bay(prob, j, ids, step=2, tcap=200, poly=False, deadline=None):
                 chosen = (t, math.ceil(max(0.0, -mnx)), math.ceil(max(0.0, -mny)), o_fit)
         rec = {"id": i, "x": chosen[1], "y": chosen[2], "o": chosen[3],
                "entry": chosen[0], "exit": chosen[0] + P}
-        if use_poly:  # cache footprint + bbox so later poly checks never rebuild
+        if use_mask:  # cache bbox + local mask + world grid offsets for later mask checks
+            blk_o = Block(i, bd, chosen[1], chosen[2], chosen[3])
+            rec["bb"] = blk_o.bounding_rect()
+            lm = _local_mask(bd, chosen[3], mask_R)
+            rec["mask"] = lm
+            rec["mix0"] = lm.ix0 + chosen[1] * mask_R
+            rec["miy0"] = lm.iy0 + chosen[2] * mask_R
+        elif use_poly:  # cache footprint + bbox so later poly checks never rebuild
             blk_o = Block(i, bd, chosen[1], chosen[2], chosen[3])
             rec["bb"] = blk_o.bounding_rect()
             rec["fp"] = _block_footprint(bd, chosen[1], chosen[2], chosen[3])
@@ -362,7 +648,8 @@ def eval_obj1(prob, assign, cache):
         if ids in cache:
             perbay[j] = cache[ids]
         else:
-            T, _ = extract_tardiness(prob, j, solve_bay(prob, j, list(ids)))
+            T, _ = extract_tardiness(prob, j, solve_bay(
+                prob, j, list(ids), mask=_MASK_SEARCH, mask_R=_MASK_R_SEARCH))
             cache[ids] = T
             perbay[j] = T
         _POOL[(j, ids)] = perbay[j]   # record (bay, set) piece for recombination
@@ -705,6 +992,8 @@ def _score_and_pack(prob, assign, poly_deadline=None):
     never lose to the AABB packing. SOLVER_NOPOLY=1 forces AABB-only (ablation)."""
     w = prob["weights"]
     m = len(prob["bays"])
+    mask_on = bool(os.environ.get("SOLVER_MASK")) and _HAS_SHAPELY
+    mask_R = int(os.environ.get("SOLVER_MASK_R", "8"))
     obj1 = 0.0
     packed = []
     for j in range(m):
@@ -713,13 +1002,22 @@ def _score_and_pack(prob, assign, poly_deadline=None):
             continue
         placed = solve_bay(prob, j, ids, poly=False)
         T_best, exits = extract_tardiness(prob, j, placed)
-        use_poly = ((poly_deadline is None or time.time() < poly_deadline)
-                    and not os.environ.get("SOLVER_NOPOLY"))
-        if use_poly:
-            placed_p = solve_bay(prob, j, ids, poly=True, deadline=poly_deadline)
-            T_poly, exits_p = extract_tardiness(prob, j, placed_p)
-            if T_poly < T_best:
-                placed, exits, T_best = placed_p, exits_p, T_poly
+        # SOLVER_MASK: best-of(AABB, supercover-mask) escalation in place of polygon.
+        # Mask is conservative vs polygon (mask-disjoint => polygon-disjoint), so the
+        # build stays feasible; best-of guarantees it never loses to AABB on a bay.
+        if mask_on and (poly_deadline is None or time.time() < poly_deadline):
+            placed_m = solve_bay(prob, j, ids, mask=True, mask_R=mask_R, deadline=poly_deadline)
+            T_m, exits_m = extract_tardiness(prob, j, placed_m)
+            if T_m < T_best:
+                placed, exits, T_best = placed_m, exits_m, T_m
+        else:
+            use_poly = ((poly_deadline is None or time.time() < poly_deadline)
+                        and not os.environ.get("SOLVER_NOPOLY"))
+            if use_poly:
+                placed_p = solve_bay(prob, j, ids, poly=True, deadline=poly_deadline)
+                T_poly, exits_p = extract_tardiness(prob, j, placed_p)
+                if T_poly < T_best:
+                    placed, exits, T_best = placed_p, exits_p, T_poly
         packed.append((j, placed, exits))
         obj1 += T_best
     obj2, obj3 = obj23(prob, assign)
@@ -763,6 +1061,7 @@ def framework_solve(prob, timelimit):
     _LOCAL_FP.clear()
     _LOCAL_BOX.clear()
     _ORIENT_BBOX.clear()
+    _LOCAL_MASK.clear()
     t0 = time.time()
     _TRACE_ON = bool(os.environ.get("SOLVER_TRACE"))
     if _TRACE_ON:
@@ -813,11 +1112,41 @@ def framework_solve(prob, timelimit):
                               else max(1.0, timelimit * 0.04))
         # the recombination (MIP + best-of guard) needs ~2 builds' worth of time
         recombine_reserve = max(recomb_floor, timelimit * recomb_frac) if recomb_on else 0.0
-        search_total = max(0.0, timelimit - poly_build_reserve - recombine_reserve - safety)
-        imp_dl = t0 + search_total * 0.5
-        bas_dl = ils_dl = t0 + search_total
-        recomb_deadline = t0 + search_total + recombine_reserve
-        poly_deadline = t0 + timelimit - safety
+        if os.environ.get("SOLVER_ADAPTIVE_RESERVE"):
+            # Adaptive reserve (env-gated): the fixed POLY fraction above was calibrated
+            # pre-speedup and over-reserves on fast builds -- it starves the ILS and
+            # leaves a large idle tail (wall << timelimit at minute+ budgets). Size the
+            # polygon-build reserve from the MEASURED cost of one best-of build of the
+            # seed instead, capped by the fixed fraction (so never larger than the current
+            # default -> downside bounded) and floored. Self-tunes to instance size: a
+            # fast/small build frees the tail to the search, a slow/large build keeps
+            # enough reserve to protect the final build. The probe build is wall-clock
+            # work accounted for via `now` below.
+            #
+            # The RECOMBINE reserve is intentionally left at its fixed fraction: recombine
+            # cost is driven by set-partitioning MIP hardness, not by build cost, so sizing
+            # it from build_cost starved it and regressed recombine-dependent instances
+            # (prob_11 +23.7% under build-cost recombine sizing -> -14.9% once kept fixed).
+            poly_margin = float(os.environ.get("SOLVER_ADAPT_POLY_MARGIN", "2.0"))
+            _tb = time.time()
+            _score_and_pack(prob, best_seed, poly_deadline=t0 + timelimit - safety)
+            build_cost = time.time() - _tb
+            if min_o1 > 1e-9:
+                poly_build_reserve = min(poly_build_reserve,
+                                         max(poly_floor, build_cost * poly_margin))
+            now = time.time()
+            search_total = max(0.0, (timelimit - safety) - (now - t0)
+                               - poly_build_reserve - recombine_reserve)
+            imp_dl = now + search_total * 0.5
+            bas_dl = ils_dl = now + search_total
+            recomb_deadline = now + search_total + recombine_reserve
+            poly_deadline = t0 + timelimit - safety
+        else:
+            search_total = max(0.0, timelimit - poly_build_reserve - recombine_reserve - safety)
+            imp_dl = t0 + search_total * 0.5
+            bas_dl = ils_dl = t0 + search_total
+            recomb_deadline = t0 + search_total + recombine_reserve
+            poly_deadline = t0 + timelimit - safety
 
     base_incumbent = None
     try:
