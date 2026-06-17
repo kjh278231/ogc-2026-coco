@@ -926,19 +926,30 @@ def _ils(prob, best, best_tot, cache, deadline, rng):
 
 
 def _bestof_obj(prob, assign, deadline=None):
-    """Full objective on the same per-bay best-of(AABB, polygon) basis the final
-    build uses: w1·Σ min(T_aabb,T_poly) + w2·Z2 + w3·Z3. Used to guard the
-    recombination adoption (Pareto-safe)."""
+    """Full objective on the SAME per-bay best-of model the final build uses
+    (_score_and_pack): best-of(AABB, supercover-mask) when SOLVER_MASK is on, else
+    best-of(AABB, polygon). w1·Σ min(T_aabb, T_alt) + w2·Z2 + w3·Z3. Used to guard
+    recombination adoption so the guard predicts the SHIPPED objective (Pareto-safe).
+    Mask is ~15x cheaper than polygon, so matching the build also keeps the guard
+    cheap -- previously this was the lone holdout still escalating to polygon, which
+    was both slow and inconsistent with what gets built."""
     w = prob["weights"]
     m = len(prob["bays"])
+    mask_on = bool(os.environ.get("SOLVER_MASK")) and _HAS_SHAPELY
+    mask_R = int(os.environ.get("SOLVER_MASK_R", "8"))
     o1 = 0.0
     for j in range(m):
         ids = [i for i, a in assign.items() if a == j]
         if not ids:
             continue
         Ta, _ = extract_tardiness(prob, j, solve_bay(prob, j, ids, poly=False))
-        Tp, _ = extract_tardiness(prob, j, solve_bay(prob, j, ids, poly=True, deadline=deadline))
-        o1 += min(Ta, Tp)
+        if mask_on:
+            Talt, _ = extract_tardiness(prob, j, solve_bay(
+                prob, j, ids, mask=True, mask_R=mask_R, deadline=deadline))
+        else:
+            Talt, _ = extract_tardiness(prob, j, solve_bay(
+                prob, j, ids, poly=True, deadline=deadline))
+        o1 += min(Ta, Talt)
     o2, o3 = obj23(prob, assign)
     return w["w1"] * o1 + w["w2"] * o2 + w["w3"] * o3
 
@@ -961,6 +972,31 @@ def _recombine(prob, best, deadline):
     cols = [(j, ids, T) for (j, ids), T in _POOL.items() if ids]
     if not cols:
         return best
+    # Per-bay top-N prune (SOLVER_POOL_PER_BAY, default 1000; 0=off): bounds the CP-SAT
+    # model AND keeps it solvable within the 8s cap. The model-build and solve cost both
+    # grow with the pool (one BoolVar + constraints per column) and are otherwise unbounded
+    # as the search budget -- hence the pool -- grows: at long timelimits the uncapped MIP
+    # could not be solved well in 8s, so recombine returned `best` unchanged and could not
+    # rescue a poor incumbent (prob_20 E=10000: 1.87M uncapped vs 618k capped). Keep each
+    # bay's lowest-tardiness pieces (ties: wider
+    # coverage first) plus the incumbent's own pieces (so the hint stays valid and
+    # `best` remains representable -> the guard can never adopt something worse). The
+    # recombine benefit plateaus within a few thousand columns (see experiment board).
+    _per_bay = int(os.environ.get("SOLVER_POOL_PER_BAY", "1000"))
+    if _per_bay > 0 and len(cols) > _per_bay * m:
+        inc = {(j, tuple(sorted(i for i in best if best[i] == j)))
+               for j in range(m) if any(best[i] == j for i in best)}
+        bins = [[] for _ in range(m)]
+        for c in cols:
+            bins[c[0]].append(c)
+        cols = []
+        for j in range(m):
+            b = bins[j]
+            b.sort(key=lambda c: (c[2], -len(c[1])))
+            keep = b[:_per_bay]
+            kept = {(c[0], c[1]) for c in keep}
+            keep.extend(c for c in b if (c[0], c[1]) in inc and (c[0], c[1]) not in kept)
+            cols.extend(keep)
     model = _cp_model.CpModel()
     x = [model.NewBoolVar(f"c{k}") for k in range(len(cols))]
     by_block = [[] for _ in range(n)]
@@ -998,7 +1034,14 @@ def _recombine(prob, best, deadline):
     for k, (j, ids, T) in enumerate(cols):
         model.AddHint(x[k], 1 if (j, ids) in inc else 0)
     cp = _cp_model.CpSolver()
-    cp.parameters.max_time_in_seconds = max(0.5, (deadline - time.time()) * 0.5)
+    # The recombine objective fully plateaus by ~8s of CP-SAT (measured: the set-
+    # partitioning improvement appears at a threshold then is flat -- see
+    # docs/experiment_board.md); the guard is now mask-cheap, so give the solve the
+    # whole reserve up to that 8s cap (env-tunable). Previously max_time scaled with
+    # the reserve (=timelimit*0.18*0.5), so at long timelimits it wasted 15-20s of
+    # CP-SAT for zero gain and inflated the idle tail.
+    _solve_cap = float(os.environ.get("SOLVER_RECOMB_SOLVE_S", "8"))
+    cp.parameters.max_time_in_seconds = min(_solve_cap, max(0.5, deadline - time.time()))
     # default 4 workers; a parallel portfolio sets SOLVER_CP_WORKERS=1 so N chains use
     # N*1 cores (no >4-thread over-subscription under the 4-core cpulimit).
     cp.parameters.num_search_workers = int(os.environ.get("SOLVER_CP_WORKERS", "4"))
@@ -1012,7 +1055,8 @@ def _recombine(prob, best, deadline):
                 A[i] = j
     if len(A) != n:
         return best
-    # best-of full-objective guard (Pareto-safe): adopt only if A truly improves.
+    # best-of full-objective guard (Pareto-safe): adopt only if A truly improves on
+    # the SAME best-of model the build ships (_bestof_obj mirrors _score_and_pack).
     if _bestof_obj(prob, A, deadline) < _bestof_obj(prob, best, deadline) - 1e-9:
         return A
     return best
@@ -1151,10 +1195,19 @@ def framework_solve(prob, timelimit):
         recomb_frac = float(os.environ.get("SOLVER_RECOMB_RESERVE", "0.18"))
         poly_floor = float(os.environ.get("SOLVER_POLY_FLOOR", "6.0"))
         recomb_floor = float(os.environ.get("SOLVER_RECOMB_FLOOR", "5.0"))
+        recomb_cap = float(os.environ.get("SOLVER_RECOMB_CAP", "10.0"))
         poly_build_reserve = (max(poly_floor, timelimit * poly_frac) if min_o1 > 1e-9
                               else max(1.0, timelimit * 0.04))
-        # the recombination (MIP + best-of guard) needs ~2 builds' worth of time
-        recombine_reserve = max(recomb_floor, timelimit * recomb_frac) if recomb_on else 0.0
+        # Recombine reserve: ABSOLUTE-capped (default 10s), not a raw fraction. Cost is
+        # MIP-hardness-bound (~8s CP-SAT plateau) + a now-mask-cheap guard/build (~1s),
+        # so it does NOT scale with timelimit. The old fraction (timelimit*0.18) ballooned
+        # to 54s at a 300s limit -- search stopped early to leave it, recombine used <1/3,
+        # and the rest became idle tail. The cap fits the recombine on the largest pools
+        # (measured ~8.8s total) while freeing the surplus back to search at long limits;
+        # at the 60s default min(10.8,10)=10 is effectively unchanged. Floor protects short
+        # limits. See docs/experiment_board.md.
+        recombine_reserve = (min(recomb_cap, max(recomb_floor, timelimit * recomb_frac))
+                             if recomb_on else 0.0)
         if os.environ.get("SOLVER_ADAPTIVE_RESERVE"):
             # Adaptive reserve (env-gated): the fixed POLY fraction above was calibrated
             # pre-speedup and over-reserves on fast builds -- it starves the ILS and

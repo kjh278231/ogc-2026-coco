@@ -6,7 +6,7 @@
 > 항상 최신으로 유지할 것: 실험 시작 → 진행 중, 끝나면 → 완료(결론과 함께), 새 아이디어는 → 계획.
 > **평가 프로토콜(필수): 모든 A/B는 eval-count 고정(`SOLVER_MAX_EVALS=N`)으로 측정**(결정론적; wall은 20~66% 변동) **+ wall 시간 별도 보고**. 상세 `docs/methodology.md` §1b.
 
-**마지막 업데이트: 2026-06-16**
+**마지막 업데이트: 2026-06-17**
 
 ---
 
@@ -24,8 +24,7 @@
 1. **adaptive R (입력 기반 R4/8/16 자동선택)** — instance마다 최적 R 다름(prob_3은 R16까지 개선, prob_20은 R4로 충분). 입력에서 싼 신호로 판단: over-rejection 수렴(knee) / footprint·AABB 면적비 / 크기·예산. 먼저 측정: 전 20개 oracle-best R + 예측신호 상관 → 규칙화. (eval-제한적이라 거친 instance에 낮은 R = 더 빠름 = 더 좋음.)
 2. **남은 속도 (eval-제한적이라 큰 objective 전환)** — (a) **mask precompute ~39% 가속**(shapely 래스터화 → numba point-in-poly/matplotlib path, supercover 안전성 재검증 필수), (b) **find_slot_mask 스캔 coarse numba화**(현재 호출당 → 통째 jit로 경계비용 제거).
 3. **prob_3 회귀 원인 규명** — eval-count 무관(numba로도 불변). R/basin 문제로 추정.
-2. **recombine 재검토 under mask** — 프로파일상 recombine 가드가 polygon 사용(~8s)이고 prob_20에선 개선 0. mask-search 하에서 가드를 mask로 바꾸거나 recombine 축소/생략 검토(시간 회수).
-3. **재실험 #3: H2 search→recombine→search 루프 under mask-search** (얇은 AABB pool이 폐기 사유였음).
+3. **재실험 #3: H2 search→recombine→search 루프 under mask-search** (얇은 AABB pool이 폐기 사유였음). **이번 진단(아래 완료)으로 약화**: 실제 사이클 수가 어려운 instance(prob_13/14/20)에선 60초 1회·300초 1~2회뿐(climb가 루프 예산을 통째로 먹어 비수렴). 작은 instance만 12~83회. 즉 "정작 중요한 instance엔 루프 안에 recombine 끼울 자리가 거의 없음" → 하려면 사이클 기아부터 풀어야.
 4. **탐색 중 incumbent 스냅샷 진짜채점** (어긋남 보정 — **자동조절 채택의 관문, 최우선**) — 지금은 끝에서 2개(탐색 전/후 최선)만 진짜 점수로 비교. 이걸 **탐색 도중 여러 시점의 최선 답 스냅샷**으로 늘려서 전부 진짜채점하고 best 제출. 그러면 "더 탐색"이 "덜 탐색(=이른 스냅샷)"보다 절대 나빠질 수 없음 → **단조 보장 → prob_7(+48%)·prob_6 회귀를 잡음.** (주의: proxy 순위 top-K만 모으면 true-good이 proxy 순위 낮아 누락될 수 있으니, **시점 체크포인트** 기반이 안전.) 이게 되면 자동조절(−9.1%)을 안전하게 켤 수 있음.
 2. **`find_slot` 추가 가속** (numba 기본형 ~2× 확보 후) — 호출당 오버헤드 제거: `ov_boxes`를 numpy로 사전계산/버퍼 재사용, 또는 `solve_bay` 단위로 더 굵게 jitting해 경계 비용 분산. (behavior-invariant, 평가횟수 고정으로 검증.)
 3. **polygon "상금" 측정** — `SOLVER_NOPOLY=1` vs 기본, full-20 @ T=180. 차이 = polygon이 지금 회복하는 양 = "더 나은 기하 테스트"가 노릴 상금의 하한. 싸다. 4번 진행 여부를 가름.
@@ -36,6 +35,11 @@
 
 ## 🟢 완료 (최근 — 결론 + 링크)
 
+- **recombine 3종 개선 (가드 mask화 + solve 8s 캡 + 예약/풀 캡) — 채택** — 발단: "in-loop recombine?" 진단 → recombine가 무겁고(60초 5~11s, 300초 17~32s) 사이클이 적음(어려운 instance 1~2회) + idle tail 폭증(300초 ~50s) 발견. 분해 결과 **3가지**:
+  - **① 가드 mask화** (`_bestof_obj`: polygon→best-of(AABB,mask), 빌드와 일치): 가드가 제출과 다른 점수(polygon)로 채택 판정하던 **stale 버그**. mask는 polygon의 ~1/15 → 가드 prob_20 **7.0s→0.3s**. **full-20 eval-count(E=2500) A/B: 회귀 0, prob_11 −7.03%·prob_14 −7.20% 개선, 나머지 18 동일, 전부 feasible → 합산 −1.39%.** "지금까지 개선이 polygon 효과 아니냐"는 가설은 반증(norecomb·이 A/B 모두 TRUE 점수 기반).
+  - **② solve 8s 캡** (`SOLVER_RECOMB_SOLVE_S`, max_time=min(8,남은)): cap-sweep 결과 recombine 점수는 **계단함수, CP-SAT ~8s에 전부 회수**(이후 16/30s 추가이득 0; prob_20 한계 8s). 기존 max_time=예약×0.5는 300초서 27s까지 낭비.
+  - **③ 풀/예약 캡** (`SOLVER_POOL_PER_BAY` 기본 1000, `SOLVER_RECOMB_CAP` 기본 10s): 예약을 timelimit×0.18(300초→54s)에서 **절대 10s**로. **핵심 발견**: 긴 timelimit에선 풀이 거대(prob_5 83사이클→2만+컬럼)해져 **CP-SAT 모델구축·solve가 8s/예약을 초과** → recombine가 best 그대로 반환, **나쁜 incumbent를 구제 못 함**(prob_20 E=10000: 캡 없으면 1.87M = norecomb와 동일, **bay당 top-1000 캡 → 618k**). 캡이 MIP를 8s로 풀리는 크기로 되돌려 고예산에서 recombine가 실제 작동. (시행착오: 예약만 10s로 줄였다가 300초서 빌드가 poly_deadline 넘겨 AABB로 잘려 prob_5 **817k·overrun** → 원인이 풀 크기임을 규명 후 풀 캡으로 해결. safety=2 시도는 overrun으로 기각.)
+  - **검증**: 전 20개 E=2500 known-good과 **bit-identical**·전부 feasible(60초/저예산은 풀 작아 캡 미발동); prob_20 **E=6000 결정론 NEW=OLD=766,341(회귀 0)**; 300초 wall에서 817k/overrun 소멸(prob_5/13 OLD와 동일, prob_20은 wall 변동); 패키징 zip smoke OK. submission/zip 동기화. 출력 `.claude/scratch/{cycle_recomb*,recomb_cap_sweep*,recomb_profile*,guard_ab,poolcap_eval,p20_resolve,newcfg_300,finalgate}`.
 - **recombine 제거 실험 (`SOLVER_NORECOMB`) — 제거 불가, 유지 확정** — eval-count 고정(E=2500) A/B: 제거 시 **prob_6 +92.5%·prob_20 +29%·prob_12 +21%** 치명적, prob_11/13/14/5는 무영향. wall은 ~10~14%(4~13s) 절감하나 대가가 너무 큼. recombine의 MIP 교차 bay-조각 재조합은 단일 탐색이 못 하는 일 → reserve 회수로 못 메움. **과거 "prob_20 recombine 0 개선" 노트 반증**(현 unified+mask 설정선 −29%). 새 eval-count 프로토콜 첫 적용. 출력 `.claude/scratch/norecomb/`.
 - **mask precompute 가속 = `shapely.prepare` (`SOLVER_MASK_PREPARE`) — 제출 기본값 ON 채택** — 프로파일: 마스크 빌드의 **~92%가 셀별 점-포함 검사**. `shapely.prepare(buf)` 한 줄로 그 단계 **−78%(4.5x)**, 빌드 총량 prob_20 21.6s→6.1s(**−72%**), **mismatch=0 = bit-identical**(feasibility 보존). **eval-count 고정서 obj 완전 동일**(prob_13 584,454·prob_20 920,088 on/off), wall만 −5~11%(짧은 예산선 더 큼)→evals↑. **앞선 wall 게이트의 "회귀"(prob_12 +38.8% 등)는 proxy-drift가 아니라 wall run-to-run 변동(20~66%) 노이즈였음**이 eval-count 재측정으로 확정(같은 설정 3회 bit-identical). → 순수 속도 레버, 품질·feasibility 무위험. commit 81d620b. 출력 `.claude/scratch/{mask_profile,prepgate,var}/`.
 - **guided destroy @ mask-search (`SOLVER_GUIDED=1`, unified 하) — 전역 기본값 반증, 단 강력한 portfolio 멤버** — full-20 paired(T=60): net **−1.4%**(9승8패3무)지만 양방향 극심한 변동(prob_4 **+48%**, prob_7/12 +37%; prob_12는 plain unified −24%승→guided +37%로 파괴). **가설 절반 적중**: 과거 AABB-guided 회귀(prob_17/18)는 mask-guided에서 중립/−0.8%로 flip — 하지만 새 회귀(prob_4/7/12)로 고통만 이동. **mix(50/50)는 net +1.5%로 더 나쁨(탈락).** **상보성 발견**: best-of(none, guided) = **−5.5% vs 현재 기본**(guided 승리 prob_9/3/15/1서 −20~36% 흡수). → guided는 **병렬 best-of portfolio 멤버**로 가치(전역 플립 ✗). R-다양성과 곱셈. **방법론 교훈**: 싼 7개 3-way A/B(−4.5%)가 경합 변동으로 오도(prob_6 −37%→실제 +21%) → full-20 paired만 신뢰. 출력 `.claude/scratch/gguide/`. → `memory/guided-destroy-portfolio.md`
