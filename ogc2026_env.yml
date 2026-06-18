@@ -19,7 +19,6 @@ dependencies:
   - pyqt6=6.11.0
   - pip:
     - jsbeautifier
-    - ortools==9.15.6755
     - gurobipy==13.0.2
     - xpress==9.8.1
     - gymnasium==1.2.3

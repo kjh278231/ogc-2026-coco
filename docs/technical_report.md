@@ -156,7 +156,7 @@ are applied — the time-bound analysis identified the right place.
 ILS moves one block between bays at a time, so it cannot reach assignments that require a
 **simultaneous** multi-bay reshuffle. To reach those, the search caches every
 `(bay, block-set) → tardiness` piece it evaluates, then solves an exact-cover
-(set-partitioning) MIP over those pieces (OR-Tools CP-SAT) that recombines them into a new
+(set-partitioning) MIP over those pieces (Gurobi) that recombines them into a new
 global assignment. The first version of this idea was **dropped**: the MIP minimized only
 `Z1+Z3`, so adopting its solution blew up imbalance (`Z2` −81% on the full objective on
 prob_5), and its one apparent win turned out to be a build-bug artifact (§4). It works once

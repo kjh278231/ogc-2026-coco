@@ -46,8 +46,24 @@ def algorithm(prob_info, timelimit=60):
     os.environ.setdefault("SOLVER_UNIFIED_ILS", "1")
     os.environ.setdefault("SOLVER_UNIFIED_INIT_FRAC", "0.6")
     os.environ.setdefault("SOLVER_MASK_PREPARE", "1")
+    # Idle reclaim: after recombine, spend leftover wall on more guarded ILS from the
+    # current best (init unchanged -> monotonic, can't regress). The reserves are sized for
+    # pre-Gurobi/numba costs so ~30% of the budget was idle; this recovers it, targeting the
+    # dominant Z3/Z2 assignment cost. Validated T=60: monotonic (incl. prob_20), prob_11
+    # -14.8%, prob_6/12 -6%, all feasible, no overrun. Single-process path (workers skip it).
+    os.environ.setdefault("SOLVER_IDLE_ILS", "1")
+    # Parallel search portfolio (4 diversified processes -> best-of by true score) uses
+    # the otherwise-idle 3 cores. It is a LONG-timelimit lever: validated -28..-35% at
+    # T=300, but at T=60 splitting the budget 4 ways starves each worker (prob_20 +29%).
+    # So it activates only when timelimit >= SOLVER_PORTFOLIO_MIN_T; below that, and on
+    # any multiprocessing failure inside portfolio_solve, we run single-process.
+    os.environ.setdefault("SOLVER_PORTFOLIO", "1")
+    _min_t = float(os.environ.get("SOLVER_PORTFOLIO_MIN_T", "180"))
     import solver
     try:
+        if os.environ.get("SOLVER_PORTFOLIO") not in (None, "", "0") and timelimit >= _min_t:
+            import portfolio
+            return portfolio.portfolio_solve(prob_info, timelimit)
         return solver.framework_solve(prob_info, timelimit)
     except Exception:
         # last-resort guaranteed-feasible fallback: pure AABB (no shapely/mask) build of the

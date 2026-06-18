@@ -22,10 +22,11 @@ from dataclasses import dataclass
 import solver as _kernel
 
 try:
-    from ortools.sat.python import cp_model as _cp_model
-    _HAS_ORTOOLS = True
+    import gurobipy as _gp
+    from gurobipy import GRB as _GRB
+    _HAS_GUROBI = True
 except Exception:  # pragma: no cover
-    _HAS_ORTOOLS = False
+    _HAS_GUROBI = False
 
 LAST_STATS: dict = {}
 
@@ -424,7 +425,7 @@ def _solution_from_packed(packed):
 
 def _solve_covering(prob, pool: ColumnPool, incumbent, deadline, rng: random.Random):
     """Set covering over existing columns, with z[i,j] dedup inside the MIP."""
-    if not _HAS_ORTOOLS or time.time() >= deadline:
+    if not _HAS_GUROBI or time.time() >= deadline:
         return None
     blocks = prob["blocks"]
     bays = prob["bays"]
@@ -446,20 +447,20 @@ def _solve_covering(prob, pool: ColumnPool, incumbent, deadline, rng: random.Ran
     if any(not by_block[i] for i in range(n)):
         return None
 
-    model = _cp_model.CpModel()
-    x = [model.NewBoolVar(f"x{k}") for k in range(len(cols))]
-    z = [[model.NewBoolVar(f"z_{i}_{j}") for j in range(m)] for i in range(n)]
+    model = _gp.Model(env=_kernel._grb_env())
+    x = [model.addVar(vtype=_GRB.BINARY, name=f"x{k}") for k in range(len(cols))]
+    z = [[model.addVar(vtype=_GRB.BINARY, name=f"z_{i}_{j}") for j in range(m)] for i in range(n)]
 
     for i in range(n):
-        model.Add(sum(x[k] for k in by_block[i]) >= 1)
-        model.Add(sum(z[i][j] for j in range(m)) == 1)
+        model.addConstr(_gp.quicksum(x[k] for k in by_block[i]) >= 1)
+        model.addConstr(_gp.quicksum(z[i][j] for j in range(m)) == 1)
         for j in range(m):
             if by_block_bay[i][j]:
-                model.Add(z[i][j] <= sum(x[k] for k in by_block_bay[i][j]))
+                model.addConstr(z[i][j] <= _gp.quicksum(x[k] for k in by_block_bay[i][j]))
             else:
-                model.Add(z[i][j] == 0)
+                model.addConstr(z[i][j] == 0)
     for j in range(m):
-        model.Add(sum(x[k] for k in by_bay[j]) <= 1)
+        model.addConstr(_gp.quicksum(x[k] for k in by_bay[j]) <= 1)
 
     obj_scale = 100
     load_scale = 100
@@ -482,12 +483,12 @@ def _solve_covering(prob, pool: ColumnPool, incumbent, deadline, rng: random.Ran
                 int(round(load_scale * (avg / areas[j]) * blocks[i]["workload"])) * z[i][j]
                 for i in range(n)
             ]
-            norm_load.append(sum(terms))
-        max_diff = model.NewIntVar(0, 10**12, "z2_scaled")
+            norm_load.append(_gp.quicksum(terms))
+        max_diff = model.addVar(lb=0, ub=10**12, vtype=_GRB.INTEGER, name="z2_scaled")
         for a in range(m):
             for b in range(m):
                 if a != b:
-                    model.Add(max_diff >= norm_load[a] - norm_load[b])
+                    model.addConstr(max_diff >= norm_load[a] - norm_load[b])
         z2_coef = max(1, int(round(obj_scale * w["w2"] / load_scale)))
         obj.append(z2_coef * max_diff)
 
@@ -495,11 +496,11 @@ def _solve_covering(prob, pool: ColumnPool, incumbent, deadline, rng: random.Ran
     # collapse the model back into exact partitioning.
     dup_coef = max(1, int(round(obj_scale * max(w.get("w3", 1.0), 1.0) * 0.02)))
     for i in range(n):
-        dup = model.NewIntVar(0, m - 1, f"dup_{i}")
-        model.Add(dup == sum(x[k] for k in by_block[i]) - 1)
+        dup = model.addVar(lb=0, ub=m - 1, vtype=_GRB.INTEGER, name=f"dup_{i}")
+        model.addConstr(dup == _gp.quicksum(x[k] for k in by_block[i]) - 1)
         obj.append(dup_coef * dup)
 
-    model.Minimize(sum(obj))
+    model.setObjective(_gp.quicksum(obj), _GRB.MINIMIZE)
 
     inc_cols = {
         (j, tuple(sorted(i for i, a in incumbent.items() if a == j)))
@@ -507,26 +508,27 @@ def _solve_covering(prob, pool: ColumnPool, incumbent, deadline, rng: random.Ran
         if any(a == j for a in incumbent.values())
     }
     for k, c in enumerate(cols):
-        model.AddHint(x[k], 1 if (c.bay, c.ids) in inc_cols else 0)
+        x[k].Start = 1 if (c.bay, c.ids) in inc_cols else 0
     for i, j0 in incumbent.items():
         for j in range(m):
-            model.AddHint(z[i][j], 1 if j == j0 else 0)
+            z[i][j].Start = 1 if j == j0 else 0
 
-    cp = _cp_model.CpSolver()
-    cp.parameters.num_search_workers = int(os.environ.get("COVER_CP_WORKERS", "1"))
-    cp.parameters.random_seed = rng.randrange(1, 2**30)
+    model.Params.Threads = int(os.environ.get("COVER_CP_WORKERS", "1"))
+    model.Params.Seed = rng.randrange(1, 2**30)
     cp_cap = float(os.environ.get("COVER_CP_TIME_CAP", "2.5"))
-    cp.parameters.max_time_in_seconds = max(0.2, min(cp_cap, (deadline - time.time()) * 0.35))
-    st = cp.Solve(model)
-    if st not in (_cp_model.OPTIMAL, _cp_model.FEASIBLE):
+    model.Params.TimeLimit = max(0.2, min(cp_cap, (deadline - time.time()) * 0.35))
+    model.optimize()
+    if model.SolCount == 0:
+        model.dispose()
         return None
 
     assign = {}
     for i in range(n):
         for j in range(m):
-            if cp.Value(z[i][j]):
+            if z[i][j].X > 0.5:
                 assign[i] = j
                 break
+    model.dispose()
     return assign if len(assign) == n else None
 
 

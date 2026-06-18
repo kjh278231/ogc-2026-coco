@@ -27,10 +27,26 @@ except Exception:                       # pragma: no cover
     _HAS_SHAPELY = False
 
 try:
-    from ortools.sat.python import cp_model as _cp_model
-    _HAS_ORTOOLS = True
+    import gurobipy as _gp
+    from gurobipy import GRB as _GRB
+    _HAS_GUROBI = True
 except Exception:                       # pragma: no cover
-    _HAS_ORTOOLS = False
+    _HAS_GUROBI = False
+
+# One silent Gurobi environment per process, started lazily so the WLS license is
+# checked out exactly once and reused across every MIP solve (creating an env per
+# model would re-checkout the license each call). OutputFlag=0 also suppresses the
+# license banner and per-solve logs.
+_GRB_ENV = None
+
+
+def _grb_env():
+    global _GRB_ENV
+    if _GRB_ENV is None:
+        _GRB_ENV = _gp.Env(empty=True)
+        _GRB_ENV.setParam("OutputFlag", 0)
+        _GRB_ENV.start()
+    return _GRB_ENV
 
 try:
     from numba import njit as _njit
@@ -123,6 +139,8 @@ if _HAS_NUMBA:
 # Pool of (bay, block_set) -> AABB tardiness pieces seen during the search, for the
 # Z2-aware set-partitioning recombination final step.
 _POOL: dict = {}
+_EXITED: dict = {}   # SOLVER_SWAP: cache of (bay-set ids) -> {block: exit_time} for the swap signal
+_SWAP_STATS = [0, 0]   # SOLVER_SWAP diagnostic: [candidates tried, swaps accepted]
 
 # Cache of local (reference-anchored) footprints, keyed by (id(block_data), orient).
 # A block placed at (x,y) has world footprint = translate(local, x, y), so the
@@ -328,6 +346,14 @@ _MASK_R_SEARCH = int(os.environ.get("SOLVER_MASK_SEARCH_R", "8"))
 # search's non-monotonicity (proxy-drift: prob_12 +38.8%, prob_15 +35.6%). Keep off until
 # the snapshot true-scoring guard makes "more search never hurts"; then flip it on.
 _MASK_PREPARE = _HAS_SHAPELY and bool(os.environ.get("SOLVER_MASK_PREPARE"))
+
+# SOLVER_SWAP (experiment, default OFF -> byte-identical): add a signal-guided swap
+# (exchange two blocks between bays) neighborhood to the hill-climb, on top of the
+# single-block relocation. Guided by post-packing exit times (see _EXITED): tardy-bay
+# congestion drivers <-> slack blocks (Z1), heavy<->light (Z2), mutual mis-preference
+# (Z3). SOLVER_SWAP_K = top-K per side. See docs/swap_move_experiment_design.md.
+_SWAP_ON = bool(os.environ.get("SOLVER_SWAP"))
+_SWAP_K = int(os.environ.get("SOLVER_SWAP_K", "8"))
 
 
 class MaskProxy:
@@ -664,10 +690,12 @@ def eval_obj1(prob, assign, cache):
         if ids in cache:
             perbay[j] = cache[ids]
         else:
-            T, _ = extract_tardiness(prob, j, solve_bay(
+            T, exited = extract_tardiness(prob, j, solve_bay(
                 prob, j, list(ids), mask=_MASK_SEARCH, mask_R=_MASK_R_SEARCH))
             cache[ids] = T
             perbay[j] = T
+            if _SWAP_ON:   # stash per-block exit times for the guided-swap signal
+                _EXITED[ids] = exited
         _POOL[(j, ids)] = perbay[j]   # record (bay, set) piece for recombination
         obj1 += perbay[j]
     return obj1, perbay
@@ -736,6 +764,60 @@ def a_pref_capped(prob, cap_factor=1.15):
 # --------------------------------------------------------------------------- #
 # searches (deadline-driven; only accept improving moves)
 # --------------------------------------------------------------------------- #
+def _swap_candidates(prob, assign, perbay, K):
+    """Signal-guided swap (i,k) candidate pairs (i,k in different bays), de-duplicated.
+    Guided by post-packing exit times (_EXITED): Z1 = tardy-bay congestion driver
+    (high tardiness) x slack block (exits early) in a non-tardy bay; Z2 = heaviest in
+    the over-loaded bay x lightest in the under-loaded bay. A filter only -- the caller
+    accepts a swap solely if total_obj truly improves. See docs/swap_move_experiment_design.md."""
+    blocks = prob["blocks"]; bays = prob["bays"]; m = len(bays)
+    members = [[] for _ in range(m)]
+    for i, j in assign.items():
+        members[j].append(i)
+    # per-block tardiness / slack from cached exit times (fall back to 0 if a bay's
+    # set was not packed this round -> that block just sorts to the bottom)
+    tard = {}; slack = {}
+    for j in range(m):
+        ex = _EXITED.get(tuple(sorted(members[j])))
+        if ex is None:
+            continue
+        for i in members[j]:
+            d = blocks[i]["due_date"]; e = ex.get(i, d)
+            tard[i] = max(0, e - d); slack[i] = d - e
+    pairs = []
+    tardy = [j for j in range(m) if perbay.get(j, 0) > 0]
+    nontardy = [j for j in range(m) if perbay.get(j, 0) <= 0]
+    # Z1: high-tardiness out (tardy bays) x high-slack in (non-tardy bays)
+    outs = sorted((i for j in tardy for i in members[j]), key=lambda i: -tard.get(i, 0))[:K]
+    ins = sorted((i for j in nontardy for i in members[j]), key=lambda i: -slack.get(i, 0))[:K]
+    for i in outs:
+        for k in ins:
+            if (assign[i] != assign[k] and fits(blocks[i], bays[assign[k]])
+                    and fits(blocks[k], bays[assign[i]])):
+                pairs.append((i, k))
+    # Z2: heaviest in the over-loaded bay x lightest in the under-loaded bay
+    areas = [b["width"] * b["height"] for b in bays]; avg = sum(areas) / m
+    u = [avg / a for a in areas]
+    loads = [0.0] * m
+    for i, j in assign.items():
+        loads[j] += blocks[i]["workload"]
+    hi = max(range(m), key=lambda j: u[j] * loads[j])
+    lo = min(range(m), key=lambda j: u[j] * loads[j])
+    if hi != lo:
+        heavy = sorted(members[hi], key=lambda i: -blocks[i]["workload"])[:K]
+        light = sorted(members[lo], key=lambda i: blocks[i]["workload"])[:K]
+        for i in heavy:
+            for k in light:
+                if fits(blocks[i], bays[lo]) and fits(blocks[k], bays[hi]):
+                    pairs.append((i, k))
+    seen = set(); out = []
+    for i, k in pairs:
+        key = (i, k) if i < k else (k, i)
+        if key not in seen:
+            seen.add(key); out.append((i, k))
+    return out
+
+
 def local_search(prob, assign, cache, deadline, patience=None):
     """Focused hill climb: move blocks out of tardy bays (first improvement).
     With `patience` set (unified ILS loop), stop after that many CONSECUTIVE
@@ -751,6 +833,31 @@ def local_search(prob, assign, cache, deadline, patience=None):
     while improved and _within(deadline):
         improved = False
         tardy = [j for j in range(m) if perbay.get(j, 0) > 0]
+        # Guided swap sweep FIRST (SOLVER_SWAP): give the signal-guided exchange pairs a
+        # turn before the relocation sweep consumes the per-call deadline on hard instances
+        # (where relocations never converge in-window, so a post-relocation swap never
+        # fires). Accept solely on a true improvement; a swap counts as one eval (fair A/B).
+        if _SWAP_ON and _within(deadline):
+            for (i, k) in _swap_candidates(prob, best, perbay, _SWAP_K):
+                if not _within(deadline):
+                    break
+                _SWAP_STATS[0] += 1
+                trial = dict(best)
+                trial[i], trial[k] = best[k], best[i]
+                tot, _ = total_obj(prob, trial, cache)
+                if tot < best_tot - 1e-9:
+                    best, best_tot = trial, tot
+                    _, perbay = total_obj(prob, best, cache)
+                    improved = True
+                    noimp = 0
+                    _SWAP_STATS[1] += 1
+                    break
+                elif patience is not None:
+                    noimp += 1
+                    if noimp >= patience:
+                        return best, best_tot
+        if improved:
+            continue   # swap changed best -> restart sweep (recompute tardy/movers)
         movers = [i for i in best if best[i] in tardy]
         for i in movers:
             if not _within(deadline):
@@ -854,6 +961,29 @@ def _climb(prob, assign, cache, deadline, patience=None):
         tardy = {j for j in range(m) if perbay.get(j, 0) > 0}
         movers = [i for i in cur if cur[i] in tardy or cur[i] == maxload
                   or cur[i] != pref_bay[i]]
+        # Guided swap sweep FIRST (SOLVER_SWAP) -- _climb is the unified-ILS workhorse
+        # (local_search gets starved), so swaps must live here to fire on hard instances.
+        if _SWAP_ON and _within(deadline):
+            for (si, sk) in _swap_candidates(prob, cur, perbay, _SWAP_K):
+                if not _within(deadline):
+                    break
+                _SWAP_STATS[0] += 1
+                trial = dict(cur)
+                trial[si], trial[sk] = cur[sk], cur[si]
+                tot, _ = total_obj(prob, trial, cache)
+                if tot < cur_tot - 1e-9:
+                    cur, cur_tot = trial, tot
+                    _, perbay = total_obj(prob, cur, cache)
+                    improved = True
+                    noimp = 0
+                    _SWAP_STATS[1] += 1
+                    break
+                elif patience is not None:
+                    noimp += 1
+                    if noimp >= patience:
+                        return cur, cur_tot
+        if improved:
+            continue   # swap changed cur -> restart sweep (recompute loads/tardy/movers)
         for i in movers:
             if not _within(deadline):
                 break
@@ -926,13 +1056,11 @@ def _ils(prob, best, best_tot, cache, deadline, rng):
 
 
 def _bestof_obj(prob, assign, deadline=None):
-    """Full objective on the SAME per-bay best-of model the final build uses
-    (_score_and_pack): best-of(AABB, supercover-mask) when SOLVER_MASK is on, else
-    best-of(AABB, polygon). w1·Σ min(T_aabb, T_alt) + w2·Z2 + w3·Z3. Used to guard
-    recombination adoption so the guard predicts the SHIPPED objective (Pareto-safe).
-    Mask is ~15x cheaper than polygon, so matching the build also keeps the guard
-    cheap -- previously this was the lone holdout still escalating to polygon, which
-    was both slow and inconsistent with what gets built."""
+    """Full objective on the SAME per-bay model the final build uses (_score_and_pack):
+    supercover-mask ONLY when SOLVER_MASK is on -- matching the search proxy exactly so
+    `more search` can no longer drift the guard/build off what the search optimizes --
+    else best-of(AABB, polygon). w1·ΣT + w2·Z2 + w3·Z3. Guards recombination adoption so
+    it predicts the SHIPPED objective (Pareto-safe). Mask is ~15x cheaper than polygon."""
     w = prob["weights"]
     m = len(prob["bays"])
     mask_on = bool(os.environ.get("SOLVER_MASK")) and _HAS_SHAPELY
@@ -942,14 +1070,16 @@ def _bestof_obj(prob, assign, deadline=None):
         ids = [i for i, a in assign.items() if a == j]
         if not ids:
             continue
-        Ta, _ = extract_tardiness(prob, j, solve_bay(prob, j, ids, poly=False))
         if mask_on:
-            Talt, _ = extract_tardiness(prob, j, solve_bay(
+            # mask-only, identical to the search proxy and the final build (no AABB best-of)
+            T, _ = extract_tardiness(prob, j, solve_bay(
                 prob, j, ids, mask=True, mask_R=mask_R, deadline=deadline))
         else:
+            Ta, _ = extract_tardiness(prob, j, solve_bay(prob, j, ids, poly=False))
             Talt, _ = extract_tardiness(prob, j, solve_bay(
                 prob, j, ids, poly=True, deadline=deadline))
-        o1 += min(Ta, Talt)
+            T = min(Ta, Talt)
+        o1 += T
     o2, o3 = obj23(prob, assign)
     return w["w1"] * o1 + w["w2"] * o2 + w["w3"] * o3
 
@@ -961,7 +1091,7 @@ def _recombine(prob, best, deadline):
     global term = w2·Z2 (min-max, linearized). Hinted with the incumbent (so a
     time cut-off still yields >= incumbent on the MIP metric) and adopted only if
     the full best-of objective actually improves -- Pareto-safe."""
-    if not _HAS_ORTOOLS:
+    if not _HAS_GUROBI:
         return best
     blocks = prob["blocks"]
     bays = prob["bays"]
@@ -972,9 +1102,9 @@ def _recombine(prob, best, deadline):
     cols = [(j, ids, T) for (j, ids), T in _POOL.items() if ids]
     if not cols:
         return best
-    # Per-bay top-N prune (SOLVER_POOL_PER_BAY, default 1000; 0=off): bounds the CP-SAT
+    # Per-bay top-N prune (SOLVER_POOL_PER_BAY, default 1000; 0=off): bounds the MIP
     # model AND keeps it solvable within the 8s cap. The model-build and solve cost both
-    # grow with the pool (one BoolVar + constraints per column) and are otherwise unbounded
+    # grow with the pool (one binary var + constraints per column) and are otherwise unbounded
     # as the search budget -- hence the pool -- grows: at long timelimits the uncapped MIP
     # could not be solved well in 8s, so recombine returned `best` unchanged and could not
     # rescue a poor incumbent (prob_20 E=10000: 1.87M uncapped vs 618k capped). Keep each
@@ -997,8 +1127,8 @@ def _recombine(prob, best, deadline):
             kept = {(c[0], c[1]) for c in keep}
             keep.extend(c for c in b if (c[0], c[1]) in inc and (c[0], c[1]) not in kept)
             cols.extend(keep)
-    model = _cp_model.CpModel()
-    x = [model.NewBoolVar(f"c{k}") for k in range(len(cols))]
+    model = _gp.Model(env=_grb_env())
+    x = [model.addVar(vtype=_GRB.BINARY, name=f"c{k}") for k in range(len(cols))]
     by_block = [[] for _ in range(n)]
     by_bay = [[] for _ in range(m)]
     wl = []
@@ -1012,47 +1142,51 @@ def _recombine(prob, best, deadline):
         cost.append(int(SCALE * (w["w1"] * T + w["w3"] * pl)))
     for i in range(n):
         if not by_block[i]:
+            model.dispose()
             return best
-        model.Add(sum(x[k] for k in by_block[i]) == 1)
+        model.addConstr(_gp.quicksum(x[k] for k in by_block[i]) == 1)
     for j in range(m):
         if by_bay[j]:
-            model.Add(sum(x[k] for k in by_bay[j]) <= 1)
-    obj = sum(x[k] * cost[k] for k in range(len(cols)))
+            model.addConstr(_gp.quicksum(x[k] for k in by_bay[j]) <= 1)
+    obj = _gp.quicksum(cost[k] * x[k] for k in range(len(cols)))
     if m >= 2:
         areas = [b["width"] * b["height"] for b in bays]; avg = sum(areas) / m
         cj = [round(avg / areas[j] * SCALE) for j in range(m)]
-        sload = [sum(cj[j] * wl[k] * x[k] for k in by_bay[j]) for j in range(m)]
-        M = model.NewIntVar(0, 10 ** 12, "M")     # = SCALE * Z2
+        sload = [_gp.quicksum(cj[j] * wl[k] * x[k] for k in by_bay[j]) for j in range(m)]
+        M = model.addVar(lb=0, ub=10 ** 12, vtype=_GRB.INTEGER, name="M")  # = SCALE * Z2
         for a in range(m):
             for b in range(m):
                 if a != b:
-                    model.Add(M >= sload[a] - sload[b])
+                    model.addConstr(M >= sload[a] - sload[b])
         obj = obj + w["w2"] * M
-    model.Minimize(obj)
+    model.setObjective(obj, _GRB.MINIMIZE)
     inc = {(j, tuple(sorted(i for i in best if best[i] == j)))
            for j in range(m) if any(best[i] == j for i in best)}
+    # MIP start = the incumbent (kept representable by the prune above), so a time
+    # cut-off still returns a solution >= the incumbent on the MIP metric.
     for k, (j, ids, T) in enumerate(cols):
-        model.AddHint(x[k], 1 if (j, ids) in inc else 0)
-    cp = _cp_model.CpSolver()
-    # The recombine objective fully plateaus by ~8s of CP-SAT (measured: the set-
+        x[k].Start = 1 if (j, ids) in inc else 0
+    # The recombine objective fully plateaus by ~8s of MIP (measured: the set-
     # partitioning improvement appears at a threshold then is flat -- see
     # docs/experiment_board.md); the guard is now mask-cheap, so give the solve the
     # whole reserve up to that 8s cap (env-tunable). Previously max_time scaled with
     # the reserve (=timelimit*0.18*0.5), so at long timelimits it wasted 15-20s of
-    # CP-SAT for zero gain and inflated the idle tail.
+    # solver time for zero gain and inflated the idle tail.
     _solve_cap = float(os.environ.get("SOLVER_RECOMB_SOLVE_S", "8"))
-    cp.parameters.max_time_in_seconds = min(_solve_cap, max(0.5, deadline - time.time()))
-    # default 4 workers; a parallel portfolio sets SOLVER_CP_WORKERS=1 so N chains use
+    model.Params.TimeLimit = min(_solve_cap, max(0.5, deadline - time.time()))
+    # default 4 threads; a parallel portfolio sets SOLVER_CP_WORKERS=1 so N chains use
     # N*1 cores (no >4-thread over-subscription under the 4-core cpulimit).
-    cp.parameters.num_search_workers = int(os.environ.get("SOLVER_CP_WORKERS", "4"))
-    st = cp.Solve(model)
-    if st not in (_cp_model.OPTIMAL, _cp_model.FEASIBLE):
+    model.Params.Threads = int(os.environ.get("SOLVER_CP_WORKERS", "4"))
+    model.optimize()
+    if model.SolCount == 0:
+        model.dispose()
         return best
     A = {}
     for k, (j, ids, T) in enumerate(cols):
-        if cp.Value(x[k]) == 1:
+        if x[k].X > 0.5:
             for i in ids:
                 A[i] = j
+    model.dispose()
     if len(A) != n:
         return best
     # best-of full-objective guard (Pareto-safe): adopt only if A truly improves on
@@ -1066,17 +1200,16 @@ def _recombine(prob, best, deadline):
 # solution assembly + top-level solve
 # --------------------------------------------------------------------------- #
 def _score_and_pack(prob, assign, poly_deadline=None):
-    """Best-of(AABB, polygon) full objective AND the exact packed bays used for that
-    score, in a single pass. The polygon pack is the same work build_solution needs
-    to emit the solution, so scoring a final candidate and building the winner from
-    it share that cost (no double packing). Returns (total, packed) where
-    packed = [(bay, placed, exits), ...]. Mirrors build_solution's per-bay logic:
+    """Full objective AND the exact packed bays used for that score, in a single pass.
+    Returns (total, packed) where packed = [(bay, placed, exits), ...].
 
-    Always pack AABB; ALSO pack with polygon escalation when there's time, and keep
-    whichever gives lower tardiness. Polygon packing is usually better (recovers
-    packing-driven tardiness) but is greedy -- placing one block earlier can push
-    others out -- so it can occasionally be WORSE than AABB; best-of guarantees we
-    never lose to the AABB packing. SOLVER_NOPOLY=1 forces AABB-only (ablation)."""
+    SOLVER_MASK (default): mask-ONLY -- score the same supercover-mask packing the search
+    optimizes, so the build/score never disagrees with the search (kills the proxy seam
+    that let `more search` drift the true objective). solve_bay(mask=True) always returns
+    a complete feasible packing (mask-disjoint => polygon-disjoint; degrades per-block to
+    AABB once `poly_deadline` passes), so this is feasible and time-bounded in one pass.
+    Otherwise: best-of(AABB, polygon) -- always pack AABB, also escalate to polygon when
+    there's time, keep whichever tardiness is lower. SOLVER_NOPOLY=1 forces AABB-only."""
     w = prob["weights"]
     m = len(prob["bays"])
     mask_on = bool(os.environ.get("SOLVER_MASK")) and _HAS_SHAPELY
@@ -1087,17 +1220,13 @@ def _score_and_pack(prob, assign, poly_deadline=None):
         ids = [i for i, a in assign.items() if a == j]
         if not ids:
             continue
-        placed = solve_bay(prob, j, ids, poly=False)
-        T_best, exits = extract_tardiness(prob, j, placed)
-        # SOLVER_MASK: best-of(AABB, supercover-mask) escalation in place of polygon.
-        # Mask is conservative vs polygon (mask-disjoint => polygon-disjoint), so the
-        # build stays feasible; best-of guarantees it never loses to AABB on a bay.
-        if mask_on and (poly_deadline is None or time.time() < poly_deadline):
-            placed_m = solve_bay(prob, j, ids, mask=True, mask_R=mask_R, deadline=poly_deadline)
-            T_m, exits_m = extract_tardiness(prob, j, placed_m)
-            if T_m < T_best:
-                placed, exits, T_best = placed_m, exits_m, T_m
+        if mask_on:
+            # mask-only: same packing the search optimizes (no AABB best-of) -> no seam.
+            placed = solve_bay(prob, j, ids, mask=True, mask_R=mask_R, deadline=poly_deadline)
+            T_best, exits = extract_tardiness(prob, j, placed)
         else:
+            placed = solve_bay(prob, j, ids, poly=False)
+            T_best, exits = extract_tardiness(prob, j, placed)
             use_poly = ((poly_deadline is None or time.time() < poly_deadline)
                         and not os.environ.get("SOLVER_NOPOLY"))
             if use_poly:
@@ -1134,10 +1263,17 @@ def build_solution(prob, assign, poly_deadline=None):
     return _solution_from_packed(packed)
 
 
-def framework_solve(prob, timelimit):
+def framework_solve(prob, timelimit, _return_assignment=False):
     """Time-managed solve. Reserves a build margin, splits the rest between the
     two-phase search and the focused search (best-of, shared cache), and always
-    returns a feasible solution."""
+    returns a feasible solution.
+
+    _return_assignment (parallel-portfolio worker mode, SOLVER_PORTFOLIO harness):
+    run search + recombine but return (best_assign, base_incumbent_assign) instead of
+    materializing -- the master true-scores candidates from all workers on one
+    consistent _score_and_pack basis. In this mode no final-build time is reserved
+    (the worker emits nothing), so that budget goes to the search. Default False keeps
+    the single-process path byte-identical."""
     global _EVALS, _EVAL_LIMIT, _TRACE_ON, _TRACE_T0, _TRACE_BEST
     _EVALS = 0
     _POOL.clear()
@@ -1157,7 +1293,7 @@ def framework_solve(prob, timelimit):
         _TRACE_BEST = float("inf")
     cache = {}
     safety = max(2.0, timelimit * 0.04)
-    recomb_on = _HAS_ORTOOLS and not os.environ.get("SOLVER_NORECOMB")
+    recomb_on = _HAS_GUROBI and not os.environ.get("SOLVER_NORECOMB")
 
     # EVALUATION mode (reproducible, deterministic): stop the searches by candidate-
     # evaluation count, run the full polygon build, and let the harness report wall
@@ -1208,6 +1344,10 @@ def framework_solve(prob, timelimit):
         # limits. See docs/experiment_board.md.
         recombine_reserve = (min(recomb_cap, max(recomb_floor, timelimit * recomb_frac))
                              if recomb_on else 0.0)
+        if _return_assignment:
+            # portfolio worker: no final build here, so reserve nothing for it and give
+            # that budget to the search (the master does the single final build).
+            poly_build_reserve = 0.0
         if os.environ.get("SOLVER_ADAPTIVE_RESERVE"):
             # Adaptive reserve (env-gated): the fixed POLY fraction above was calibrated
             # pre-speedup and over-reserves on fast builds -- it starves the ILS and
@@ -1224,12 +1364,13 @@ def framework_solve(prob, timelimit):
             # it from build_cost starved it and regressed recombine-dependent instances
             # (prob_11 +23.7% under build-cost recombine sizing -> -14.9% once kept fixed).
             poly_margin = float(os.environ.get("SOLVER_ADAPT_POLY_MARGIN", "2.0"))
-            _tb = time.time()
-            _score_and_pack(prob, best_seed, poly_deadline=t0 + timelimit - safety)
-            build_cost = time.time() - _tb
-            if min_o1 > 1e-9:
-                poly_build_reserve = min(poly_build_reserve,
-                                         max(poly_floor, build_cost * poly_margin))
+            if not _return_assignment:   # worker mode reserves no build time -> skip probe
+                _tb = time.time()
+                _score_and_pack(prob, best_seed, poly_deadline=t0 + timelimit - safety)
+                build_cost = time.time() - _tb
+                if min_o1 > 1e-9:
+                    poly_build_reserve = min(poly_build_reserve,
+                                             max(poly_floor, build_cost * poly_margin))
             now = time.time()
             search_total = max(0.0, (timelimit - safety) - (now - t0)
                                - poly_build_reserve - recombine_reserve)
@@ -1245,6 +1386,9 @@ def framework_solve(prob, timelimit):
             poly_deadline = t0 + timelimit - safety
 
     base_incumbent = None
+    # ILS perturbation seed (SOLVER_SEED, default 0 -> byte-identical). A parallel
+    # portfolio gives each worker a distinct seed for trajectory diversity.
+    _seed = int(os.environ.get("SOLVER_SEED", "0"))
     try:
         if os.environ.get("SOLVER_UNIFIED_ILS"):
             # Unified ILS (env-gated): one loop replaces the improved->local->ILS
@@ -1270,7 +1414,7 @@ def framework_solve(prob, timelimit):
             if t_bas < best_tot:
                 best, best_tot = asg_bas, t_bas
             base_incumbent = dict(best)
-            rng = random.Random(0)
+            rng = random.Random(_seed)
             # Per-kick inner-climb stop: by default deadline-driven (loop_dl), but
             # SOLVER_UNIFIED_PATIENCE switches each climb to a timing-independent
             # "stop after K consecutive non-improving evals" rule (loop_dl stays as the
@@ -1300,7 +1444,7 @@ def framework_solve(prob, timelimit):
             base_incumbent = dict(best)
             # iterated local search on whatever budget the main search left unused
             # (SOLVER_NOILS=1 disables it -- ablation baseline)
-            rng = random.Random(0)
+            rng = random.Random(_seed)
             do_ils = not os.environ.get("SOLVER_NOILS")
             # H2 (search -> recombine -> search loop) was tested and rejected: splitting the
             # ILS budget to recombine mid-search commits the assignment to a basin built from
@@ -1318,6 +1462,11 @@ def framework_solve(prob, timelimit):
             best = _recombine(prob, best, deadline=rdl)
     except Exception:
         pass  # keep the best feasible assignment found so far
+
+    # Portfolio worker mode: return the search result (post-recombine best + the trusted
+    # base incumbent) for the master to true-score against other workers. No build here.
+    if _return_assignment:
+        return best, base_incumbent
 
     # Final true-objective guard (Guarded methodology). The proxy-driven tail (ILS +
     # recombination) may have moved `best` off `base_incumbent` on the AABB proxy
