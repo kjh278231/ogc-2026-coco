@@ -52,6 +52,17 @@ def algorithm(prob_info, timelimit=60):
     # dominant Z3/Z2 assignment cost. Validated T=60: monotonic (incl. prob_20), prob_11
     # -14.8%, prob_6/12 -6%, all feasible, no overrun. Single-process path (workers skip it).
     os.environ.setdefault("SOLVER_IDLE_ILS", "1")
+    # MIP-propose + ILS-repair: a Gurobi assignment MIP (min w2*Z2 + w3*Z3) proposes a
+    # low-preference-loss basin the single-trajectory ILS can't reach from a_pref, then
+    # local_search repairs its tardiness; carried as a guarded best-of candidate. SERIAL by
+    # necessity -- the WLS license is single-use (one Gurobi process at a time), so it can't run
+    # parallel to the search's recombine. Front-loaded (the search deadlines are t0-based, so it
+    # costs a bounded ~8s slice): unlike a post-recombine tail slice it still fires on the
+    # biggest winners (which have no idle tail) and never overruns the final build. Validated
+    # T=60: prob_11/13/20 -23..-48% (wins dominate), prob_37 +10.9% / prob_26 +4.3% / prob_40
+    # +1.5% (search-theft on low-Z3 instances), all feasible, no overrun. Single-process path
+    # (workers skip it); mirrors last year's MIP-centric winner.
+    os.environ.setdefault("SOLVER_MIP_REPAIR", "1")
     # Parallel search portfolio (4 diversified processes -> best-of by true score) uses
     # the otherwise-idle 3 cores. It is a LONG-timelimit lever: validated -28..-35% at
     # T=300, but at T=60 splitting the budget 4 ways starves each worker (prob_20 +29%).

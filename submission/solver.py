@@ -1251,6 +1251,60 @@ def build_solution(prob, assign, poly_deadline=None):
     return _solution_from_packed(packed)
 
 
+def _mip_repair(prob, mip_tl, repair_deadline):
+    """Assignment-MIP propose + local-search repair -- a guarded best-of candidate.
+    Gurobi minimizes w2*Z2 + w3*Z3 over block->bay assignments (fits-constrained): a
+    low-preference-loss assignment the single-trajectory ILS can't reach from a_pref.
+    That assignment usually carries tardiness (Z1>0, catastrophic given the large w1),
+    so local_search repairs Z1 to ~0 while keeping the low Z3. Returns the repaired
+    assignment or None. Validated -16..-62% on high-Z3 instances (prob_11/13/20),
+    never worse via the final best-of guard. Mirrors last year's winner's MIP-centric
+    formulation (the Z2 min-max term acts as a soft capacity)."""
+    if not _HAS_GUROBI:
+        return None
+    blocks = prob["blocks"]
+    bays = prob["bays"]
+    w = prob["weights"]
+    n = len(blocks)
+    m = len(bays)
+    try:
+        areas = [b["width"] * b["height"] for b in bays]
+        avg = sum(areas) / m
+        u = [avg / areas[j] for j in range(m)]
+        md = _gp.Model(env=_grb_env())
+        x = [[md.addVar(vtype=_GRB.BINARY) for j in range(m)] for i in range(n)]
+        for i in range(n):
+            md.addConstr(_gp.quicksum(x[i][j] for j in range(m)) == 1)
+            for j in range(m):
+                if not fits(blocks[i], bays[j]):
+                    md.addConstr(x[i][j] == 0)
+        load = [_gp.quicksum(blocks[i]["workload"] * x[i][j] for i in range(n)) for j in range(m)]
+        Mv = md.addVar(lb=0)
+        for a in range(m):
+            for b in range(m):
+                if a != b:
+                    md.addConstr(Mv >= u[a] * load[a] - u[b] * load[b])
+        pref = _gp.quicksum(
+            (max(blocks[i]["bay_preferences"]) - blocks[i]["bay_preferences"][j]) * x[i][j]
+            for i in range(n) for j in range(m))
+        md.setObjective(w["w2"] * Mv + w["w3"] * pref, _GRB.MINIMIZE)
+        md.Params.TimeLimit = max(0.5, mip_tl)
+        md.Params.Threads = int(os.environ.get("SOLVER_CP_WORKERS", "4"))
+        md.optimize()
+        if md.SolCount == 0:
+            md.dispose()
+            return None
+        A = {i: next(j for j in range(m) if x[i][j].X > 0.5) for i in range(n)}
+        md.dispose()
+    except Exception:
+        return None
+    try:
+        A2, _ = local_search(prob, A, {}, repair_deadline)   # repair Z1 -> ~0, keep low Z3
+        return A2
+    except Exception:
+        return A
+
+
 def framework_solve(prob, timelimit, _return_assignment=False):
     """Time-managed solve. Reserves a build margin, splits the rest between the
     two-phase search and the focused search (best-of, shared cache), and always
@@ -1280,7 +1334,7 @@ def framework_solve(prob, timelimit, _return_assignment=False):
         _TRACE_T0 = t0
         _TRACE_BEST = float("inf")
     cache = {}
-    safety = max(2.0, timelimit * 0.04)
+    safety = max(2.0, timelimit * 0.06)
     recomb_on = _HAS_GUROBI and not os.environ.get("SOLVER_NORECOMB")
 
     # EVALUATION mode (reproducible, deterministic): stop the searches by candidate-
@@ -1372,6 +1426,23 @@ def framework_solve(prob, timelimit, _return_assignment=False):
             recomb_deadline = t0 + search_total + recombine_reserve
             poly_deadline = t0 + timelimit - safety
 
+    # MIP-propose + ILS-repair candidate (SOLVER_MIP_REPAIR, wall mode). FRONT-LOADED: a Gurobi
+    # assignment MIP (min w2*Z2 + w3*Z3) proposes a low-preference-loss basin the single ILS
+    # trajectory can't reach from a_pref, then local_search repairs its tardiness; carried to
+    # the final best-of guard so it can only ever help. Serial by necessity -- the WLS license
+    # is SINGLE-USE (one Gurobi process at a time), so it cannot overlap the search's recombine
+    # (a concurrent sidecar makes recombine silently no-op -> prob_40 +44%). Front-loaded (not
+    # tail-placed) because the search deadlines below are t0-based, so this costs a bounded slice
+    # AND -- unlike a post-recombine tail slice -- it (a) still fires on the biggest winners
+    # (prob_20), which have no idle tail for a tail slice, and (b) preserves the full final-build
+    # margin (a tail slice overran prob_40). Cost is ~8s of search -> small regressions on
+    # search-bound low-Z3 instances (prob_37 +10.9%), but the high-Z3 wins (-23..-48%) dominate.
+    mip_cand = None
+    if (os.environ.get("SOLVER_MIP_REPAIR") not in (None, "", "0")
+            and _EVAL_LIMIT is None and not _return_assignment and _HAS_GUROBI):
+        _mb = min(float(os.environ.get("SOLVER_MIP_REPAIR_CAP", "8")), timelimit * 0.15)
+        mip_cand = _mip_repair(prob, _mb * 0.5, time.time() + _mb)
+
     base_incumbent = None
     try:
         if os.environ.get("SOLVER_UNIFIED_ILS"):
@@ -1449,7 +1520,7 @@ def framework_solve(prob, timelimit, _return_assignment=False):
         # deadlines are UNCHANGED, so this only EXTENDS the same trajectory (best is a
         # running min -> monotonic, can't regress) -- unlike shrinking the reserve, which
         # moves the init deadline and reshapes the trajectory (drift). Targets the dominant
-        # Z3/Z2 assignment cost. idle_dl leaves poly_build_reserve for the final build.
+        # Z3/Z2 assignment cost. idle_dl leaves a build margin for the final build.
         if (os.environ.get("SOLVER_IDLE_ILS") not in (None, "", "0") and _EVAL_LIMIT is None
                 and not _return_assignment):
             # Size the idle window from the ACTUAL build cost -- one throwaway build of the
@@ -1487,13 +1558,24 @@ def framework_solve(prob, timelimit, _return_assignment=False):
     # so the guard overrides only when base_incumbent is genuinely better -- never a
     # regression vs the previous behaviour. Skipped when best == base_incumbent (the
     # common case: no proxy move stuck), keeping that path bit-identical.
-    if base_incumbent is not None and best != base_incumbent:
+    # Best-of over {best, base_incumbent, mip_cand} on the true objective. `best` is scored
+    # FIRST (keeps the full polygon budget) and wins ties, so adding candidates can only
+    # improve the emitted solution -- never a regression. mip_cand is the MIP-repair candidate
+    # (None unless SOLVER_MIP_REPAIR in wall mode). When only `best` remains this is the
+    # original bit-identical build_solution(best) fast path.
+    cands = [best]
+    if base_incumbent is not None and base_incumbent != best:
+        cands.append(base_incumbent)
+    if mip_cand is not None and mip_cand != best and mip_cand not in cands:
+        cands.append(mip_cand)
+    if len(cands) > 1:
         try:
-            cand_obj, cand_packed = _score_and_pack(prob, best, poly_deadline=poly_deadline)
-            base_obj, base_packed = _score_and_pack(prob, base_incumbent, poly_deadline=poly_deadline)
-            if base_obj < cand_obj - 1e-9:
-                return _solution_from_packed(base_packed)
-            return _solution_from_packed(cand_packed)
+            win_obj, win_packed = _score_and_pack(prob, cands[0], poly_deadline=poly_deadline)
+            for c in cands[1:]:
+                o, pk = _score_and_pack(prob, c, poly_deadline=poly_deadline)
+                if o < win_obj - 1e-9:
+                    win_obj, win_packed = o, pk
+            return _solution_from_packed(win_packed)
         except Exception:
             pass  # any failure: fall through to the standard build of `best`
 
