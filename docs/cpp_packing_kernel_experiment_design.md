@@ -20,6 +20,18 @@
 >      cold-start. If cold-start is small, C++ yields ~nothing regardless of permission.
 >      **Measure first (Section 9), now amplified by the parallel portfolio: N worker
 >      processes spawn -> cold-start x N.** This is runnable on Windows now.
+> - **GATE 0 PART 2 MEASURED (2026-06-18) -> REJECT.** Numba cold-start is tiny:
+>   warm disk cache (normal per-instance) prob_1/13/20 = **0.16 / 0.31 / ~0s**; cold cache
+>   (first contest instance, full JIT compile) prob_13 = **0.63s** — i.e. ~1-3% of the
+>   12-23s wall. The ONLY thing C++ removes is this cold-start, so the payoff is ~1-3% for
+>   a large Linux build pipeline + OS/packaging risk. **Worse: numba0 (pure Python) ~= numba1
+>   in this path** (prob_13 14.5 vs 14.43) -> the numba'd kernels (Targets A/B/C) are NOT the
+>   bottleneck; shapely mask rasterization (~39%, not numba'd) is. So the only C++ target with
+>   value is the float-geometry rasterizer (Target D), which is the hardest/safety-critical.
+>   **Verdict: do not pursue the C++ kernel port for leaderboard performance.** (`.claude/scratch`
+>   coldstart measurement; design doc Section 9.) The novelty angle for the report remains, but
+>   performance ROI is poor. Also note (separate finding): numba's value in the current mask-only
+>   path is worth re-checking — it may be droppable.
 > - **Cheaper sibling unlocked: Gurobi from Python (no C++).** gurobipy 13.0.2 is also
 >   installed, so OR-Tools -> Gurobi for the set-partitioning recombine can be A/B-tested
 >   in pure Python (no native build). Our recombine is pool-bound (capped to solve in 8s,

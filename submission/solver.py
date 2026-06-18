@@ -136,6 +136,42 @@ if _HAS_NUMBA:
                         return True
         return False
 
+    @_njit(cache=True)
+    def _scan_mask_orient(a_rows, a_h, a_ww, a_ix0, a_iy0,
+                          x_start, x_end, y_start, y_end, step,
+                          lbx0, lby0, lbx1, lby1, R,
+                          pm_rows, pm_h, pm_ww, pm_ix0, pm_iy0, pm_box, n, ry, rx):
+        """Scan one orientation's (x, y) grid for the FIRST supercover-mask-disjoint
+        placement at/after the resume point (ry, rx), AABB-prefiltered against the n
+        present masks. Returns (x, y) or (-1, -1). This moves find_slot_mask's inner
+        position loop + the billion masks_overlap calls into one jit (no per-call
+        Python<->numba boundary). check_entry stays in Python (resumes via ry/rx)."""
+        y = ry
+        while y <= y_end:
+            cy0 = lby0 + y
+            cy1 = lby1 + y
+            cand_ay = a_iy0 + y * R
+            x = rx if y == ry else x_start
+            while x <= x_end:
+                cx0 = lbx0 + x
+                cx1 = lbx1 + x
+                cand_ax = a_ix0 + x * R
+                bad = False
+                for p in range(n):
+                    if not (cx0 < pm_box[p, 2] and pm_box[p, 0] < cx1
+                            and cy0 < pm_box[p, 3] and pm_box[p, 1] < cy1):
+                        continue  # AABB-disjoint => footprints disjoint => safe
+                    if _masks_overlap_u64(a_rows, cand_ay, a_h, a_ww,
+                                          pm_rows[p], pm_iy0[p], pm_h[p], pm_ww[p],
+                                          cand_ax - pm_ix0[p]):
+                        bad = True
+                        break
+                if not bad:
+                    return x, y
+                x += step
+            y += step
+        return -1, -1
+
 # Pool of (bay, block_set) -> AABB tardiness pieces seen during the search, for the
 # Z2-aware set-partitioning recombination final step.
 _POOL: dict = {}
@@ -491,6 +527,70 @@ def find_slot_poly(bay, present_objs, ov_boxfps, bd, bid, W, H, step):
     return None
 
 
+def _find_slot_mask_jit(bay, present_objs, ov_boxmasks, bd, bid, W, H, step, R):
+    """Numba-scan find_slot_mask: marshal the present masks into padded uint64 arrays
+    ONCE, then scan each orientation entirely inside _scan_mask_orient (removes the
+    per-position masks_overlap Python<->numba boundary -- the profiled #1 hot path).
+    Behaviour-identical to the pure-Python find_slot_mask: same AABB pre-filter, same
+    supercover overlap test, same first-fit order; check_entry stays in Python and
+    resumes the scan after a crane-rejected slot."""
+    n = len(ov_boxmasks)
+    if n:
+        max_h = max(1, max(bm[1].height_rows for bm in ov_boxmasks))
+        max_w = max(1, max(bm[1].width_words for bm in ov_boxmasks))
+    else:
+        max_h = max_w = 1
+    nn = max(1, n)
+    pm_rows = _np.zeros((nn, max_h, max_w), dtype=_np.uint64)
+    pm_h = _np.zeros(nn, dtype=_np.int64)
+    pm_ww = _np.zeros(nn, dtype=_np.int64)
+    pm_ix0 = _np.zeros(nn, dtype=_np.int64)
+    pm_iy0 = _np.zeros(nn, dtype=_np.int64)
+    pm_box = _np.zeros((nn, 4), dtype=_np.float64)
+    for p, (ob_box, ob_mask, ob_mix0, ob_miy0) in enumerate(ov_boxmasks):
+        h, wds = ob_mask.height_rows, ob_mask.width_words
+        if h and wds:
+            pm_rows[p, :h, :wds] = ob_mask.rows_u64
+        pm_h[p] = h
+        pm_ww[p] = wds
+        pm_ix0[p] = ob_mix0
+        pm_iy0[p] = ob_miy0
+        pm_box[p, 0] = ob_box[0]
+        pm_box[p, 1] = ob_box[1]
+        pm_box[p, 2] = ob_box[2]
+        pm_box[p, 3] = ob_box[3]
+    for o in range(len(bd["shape"])):
+        mnx, mny, mxx, mxy = orient_bbox(bd, o)
+        x_start = int(math.ceil(max(0.0, -mnx)))
+        x_end = int(math.floor(W - mxx))
+        y_start = int(math.ceil(max(0.0, -mny)))
+        y_end = int(math.floor(H - mxy))
+        if x_end < x_start or y_end < y_start:
+            continue
+        lbx0, lby0, lbx1, lby1 = _local_box(bd, o)
+        cmask = _local_mask(bd, o, R)
+        a_rows = cmask.rows_u64
+        if a_rows.shape[1] == 0:                       # empty footprint -> numba-safe shape
+            a_rows = _np.zeros((max(1, cmask.height_rows), 1), dtype=_np.uint64)
+        ry, rx = y_start, x_start
+        while ry <= y_end:
+            x, y = _scan_mask_orient(
+                a_rows, int(cmask.height_rows), int(cmask.width_words),
+                int(cmask.ix0), int(cmask.iy0),
+                x_start, x_end, y_start, y_end, int(step),
+                float(lbx0), float(lby0), float(lbx1), float(lby1), int(R),
+                pm_rows, pm_h, pm_ww, pm_ix0, pm_iy0, pm_box, n, ry, rx)
+            if x < 0:
+                break
+            cand = Block(block_id=bid, block_data=bd, x=x, y=y, orient_idx=o)
+            if not check_entry(bay, present_objs, cand):
+                return (x, y, o)
+            rx, ry = x + step, y                       # crane-rejected -> resume after (x, y)
+            if rx > x_end:
+                rx, ry = x_start, y + step
+    return None
+
+
 def find_slot_mask(bay, present_objs, ov_boxmasks, bd, bid, W, H, step, R):
     """Like find_slot_poly but disjointness is the SUPERCOVER bitmask instead of the
     exact polygon: more permissive than AABB (packs tighter), conservative vs polygon
@@ -498,6 +598,8 @@ def find_slot_mask(bay, present_objs, ov_boxmasks, bd, bid, W, H, step, R):
     shapely. `ov_boxmasks` = [(bbox, MaskProxy, world_ix0, world_iy0)] of the
     temporally-overlapping placed blocks; AABB is the cheap pre-filter (AABB-disjoint
     => footprints disjoint => safe, since footprint <= AABB)."""
+    if _NUMBA_ON:
+        return _find_slot_mask_jit(bay, present_objs, ov_boxmasks, bd, bid, W, H, step, R)
     for o in range(len(bd["shape"])):
         mnx, mny, mxx, mxy = orient_bbox(bd, o)
         x_start = math.ceil(max(0.0, -mnx))
