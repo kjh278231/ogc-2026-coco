@@ -1197,6 +1197,17 @@ def _recombine(prob, best, deadline):
     # default 4 threads; a parallel portfolio sets SOLVER_CP_WORKERS=1 so N chains use
     # N*1 cores (no >4-thread over-subscription under the 4-core cpulimit).
     model.Params.Threads = int(os.environ.get("SOLVER_CP_WORKERS", "4"))
+    # NoRel heuristic (Params.NoRelHeurTime, SOLVER_RECOMB_NOREL seconds; default OFF): finds
+    # good feasible solutions WITHOUT the LP relaxation -- last year's winner's lever for big
+    # (>10k var) set-partitioning MIPs. It only pays off on a LARGE/hard pool; the shipped
+    # cost-pruned pool (<=1000/bay, <=~5k columns) already solves to optimality in ~2s, so NoRel
+    # there only wastes solve time and a larger pool to feed it regressed prob_20 (+6.5% @T=180).
+    # Kept as an off-by-default knob for a future large-MIP recombine; on the shipped config it
+    # is bit-identical. (It DID help the cross-worker union -16% on prob_20, but that union was
+    # rejected -- see memory/portfolio-recombine-degraded.md.)
+    _nrt = float(os.environ.get("SOLVER_RECOMB_NOREL", "0"))
+    if _nrt > 0:
+        model.Params.NoRelHeurTime = min(_nrt, float(model.Params.TimeLimit))
     model.optimize()
     if model.SolCount == 0:
         model.dispose()
