@@ -1072,6 +1072,31 @@ def _bestof_obj(prob, assign, deadline=None):
     return w["w1"] * o1 + w["w2"] * o2 + w["w3"] * o3
 
 
+def _pool_prune_key(prob, T_index=2, ids_index=1):
+    """Per-bay pool-prune sort key for a piece tuple c with c[0]=bay, c[ids_index]=ids,
+    c[T_index]=tardiness. Keyed by the recombine COLUMN COST (w1*T + w3*pref_loss) by DEFAULT
+    -- aligned with the (Z3-dominant) objective, so the prune keeps objective-relevant pieces
+    (ties: wider coverage first), not merely
+    low-tardiness ones. Validated: when the prune is tight, tardiness-only keeps low-T/bad-Z3
+    pieces that won't tile, so recombine finds NO improvement, while cost-prune fires (prob_6
+    -47%, prob_13 -25%; cost <= tardiness on every tested instance). SOLVER_POOL_PRUNE_COST=0
+    restores the legacy tardiness key. When the pool is small enough that no prune happens
+    (pool <= per_bay*m, e.g. the T=60 regime) both keys are bit-identical (no pieces dropped)."""
+    if os.environ.get("SOLVER_POOL_PRUNE_COST", "1") == "0":
+        return lambda c: (c[T_index], -len(c[ids_index]))
+    w = prob["weights"]; blocks = prob["blocks"]
+    w1, w3 = w["w1"], w["w3"]
+    mx = [max(b["bay_preferences"]) for b in blocks]
+
+    def key(c):
+        j = c[0]; ids = c[ids_index]
+        pl = 0
+        for i in ids:
+            pl += mx[i] - blocks[i]["bay_preferences"][j]
+        return (w1 * c[T_index] + w3 * pl, -len(ids))
+    return key
+
+
 def _recombine(prob, best, deadline):
     """Z2-aware set-partitioning recombination of the cached (bay,set) pieces.
     Local search moves one block at a time and cannot recombine whole bay-pieces
@@ -1104,13 +1129,20 @@ def _recombine(prob, best, deadline):
     if _per_bay > 0 and len(cols) > _per_bay * m:
         inc = {(j, tuple(sorted(i for i in best if best[i] == j)))
                for j in range(m) if any(best[i] == j for i in best)}
+        # Prune key: by default keep each bay's lowest-TARDINESS pieces. The objective is
+        # Z3-dominant, though, so tardiness-only keeps low-T pieces that may be bad on the
+        # dominant w3*pref term and discards moderate-T/low-pref pieces the recombine needs
+        # (this is what diluted the portfolio's cross-worker UNION -> recombine found no
+        # improvement). SOLVER_POOL_PRUNE_COST switches the key to the piece's actual recombine
+        # COLUMN COST (w1*T + w3*pref_loss), i.e. its real contribution to the objective.
+        _key = _pool_prune_key(prob, T_index=2, ids_index=1)
         bins = [[] for _ in range(m)]
         for c in cols:
             bins[c[0]].append(c)
         cols = []
         for j in range(m):
             b = bins[j]
-            b.sort(key=lambda c: (c[2], -len(c[1])))
+            b.sort(key=_key)
             keep = b[:_per_bay]
             kept = {(c[0], c[1]) for c in keep}
             keep.extend(c for c in b if (c[0], c[1]) in inc and (c[0], c[1]) not in kept)
