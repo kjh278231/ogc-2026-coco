@@ -53,15 +53,82 @@ def _options(blocks, bays, i):
 
 
 # --------------------------------------------------------------------------- #
-# destroy operators -> return a list of removed block ids
+# destroy operators -> return a list of removed block ids.
+# Uniform signature (prob, cur, perbay, rng, k) so the weighted selector can call
+# any of them interchangeably (perbay unused by some).
 # --------------------------------------------------------------------------- #
+_SHAW_SPANS: dict = {}   # id(prob) -> (span_release, span_due, span_workload, span_pref)
+
+
+def _shaw_spans(prob):
+    key = id(prob)
+    v = _SHAW_SPANS.get(key)
+    if v is not None:
+        return v
+    blocks = prob["blocks"]
+    m = len(prob["bays"])
+    rels = [b["release_time"] for b in blocks]
+    dues = [b["due_date"] for b in blocks]
+    wls = [b["workload"] for b in blocks]
+    max_pref = max((max(b["bay_preferences"]) for b in blocks), default=1)
+    v = (max(1.0, max(rels) - min(rels)), max(1.0, max(dues) - min(dues)),
+         max(1.0, max(wls) - min(wls)), max(1.0, m * max_pref))
+    _SHAW_SPANS[key] = v
+    return v
+
+
+_SHAW_NEIGHBORS: dict = {}   # id(prob) -> list[list[int]]: per seed, blocks sorted most-related-first
+
+
+def _shaw_neighbors(prob):
+    """Precomputed per-seed relatedness ranking. Relatedness depends only on STATIC block
+    attributes (release/due/preference/workload), NOT on the current solution, so it is
+    computed ONCE per solve (O(n^2 * m) + sorts, n<=~300 -> trivial). Each destroy then
+    samples from a presorted list in O(k), instead of recomputing O(n*m) relatedness +
+    O(n log n) sort every call -- which was eating Shaw's iteration budget."""
+    key = id(prob)
+    v = _SHAW_NEIGHBORS.get(key)
+    if v is not None:
+        return v
+    blocks = prob["blocks"]
+    n = len(blocks)
+    m = len(prob["bays"])
+    sr, sd, sw, sp = _shaw_spans(prob)
+    wt = float(os.environ.get("ALNS_SHAW_T", "3.0"))
+    wp = float(os.environ.get("ALNS_SHAW_P", "5.0"))
+    wlw = float(os.environ.get("ALNS_SHAW_L", "2.0"))
+    rel = [b["release_time"] for b in blocks]
+    due = [b["due_date"] for b in blocks]
+    wl = [b["workload"] for b in blocks]
+    prefs = [b["bay_preferences"] for b in blocks]
+    twden = sr + sd
+    neigh = [None] * n
+    for s in range(n):
+        ps, rs, ds, ws = prefs[s], rel[s], due[s], wl[s]
+        scored = []
+        for i in range(n):
+            if i == s:
+                continue
+            tw = abs(rs - rel[i]) + abs(ds - due[i])
+            pi = prefs[i]
+            pd = 0
+            for j in range(m):
+                pd += abs(ps[j] - pi[j])
+            R = wt * tw / twden + wp * pd / sp + wlw * abs(ws - wl[i]) / sw
+            scored.append((R, i))
+        scored.sort()
+        neigh[s] = [i for _, i in scored]
+    _SHAW_NEIGHBORS[key] = neigh
+    return neigh
+
+
 def _destroy_worst_tardy(prob, cur, perbay, rng, k):
     """Remove k blocks from the most-tardy bay (Z1 is the dominant term and has no
     cheap surrogate, so target the bay the ACTUAL packing reports as late). Falls
     back to worst-preference when nothing is tardy (the Z1=0 instances)."""
     tardy = [j for j, t in perbay.items() if t > 0]
     if not tardy:
-        return _destroy_worst_pref(prob, cur, rng, k)
+        return _destroy_worst_pref(prob, cur, perbay, rng, k)
     j = max(tardy, key=lambda j: perbay[j])
     ids = [i for i in cur if cur[i] == j]
     if len(ids) <= k:
@@ -69,7 +136,7 @@ def _destroy_worst_tardy(prob, cur, perbay, rng, k):
     return rng.sample(ids, k)
 
 
-def _destroy_worst_pref(prob, cur, rng, k):
+def _destroy_worst_pref(prob, cur, perbay, rng, k):
     """Remove blocks sitting far from their preferred bay (high Z3 contribution).
     Slightly randomized over the top band so it is not deterministic."""
     blocks = prob["blocks"]
@@ -80,9 +147,55 @@ def _destroy_worst_pref(prob, cur, rng, k):
     return rng.sample(band, min(k, len(band)))
 
 
-def _destroy_random(prob, cur, rng, k):
+def _destroy_random(prob, cur, perbay, rng, k):
     ids = list(cur)
     return rng.sample(ids, min(k, len(ids)))
+
+
+def _destroy_shaw(prob, cur, perbay, rng, k):
+    """Shaw / related removal via the PRECOMPUTED relatedness ranking: pick a seed, then
+    sample k blocks from its presorted neighbor list with a rank^3 bias toward the most
+    related -- O(k) per call. Relatedness blends time-window closeness (Z1 contention),
+    preference-vector distance (Z3), and workload distance (Z2). Removing an interacting
+    cluster lets the repair reshuffle them jointly. (cur is always a complete assignment,
+    so the seed's neighbor list already covers every other block.)"""
+    ids = list(cur)
+    if len(ids) <= k:
+        return ids
+    neigh = _shaw_neighbors(prob)
+    s = rng.choice(ids)
+    # neigh[s] is precomputed == the old per-call `sorted(others, key=relatedness)` list
+    # (relatedness is solution-independent; ties break on block index in both), so the old
+    # pop-without-replacement loop on it is BIT-IDENTICAL to the original shaw -- only the
+    # O(n*m) relatedness recompute + O(n log n) sort are skipped, not the behaviour.
+    pool = list(neigh[s])
+    chosen = [s]
+    while len(chosen) < k and pool:
+        idx = int((rng.random() ** 3) * len(pool))   # rank^3 -> bias to most-related front
+        chosen.append(pool.pop(idx))
+    return chosen
+
+
+def _destroy_bay(prob, cur, perbay, rng, k):
+    """Bay-emptying (route_removal analog): remove a concentrated chunk from a single
+    bay (biased toward the worst-tardy / most-loaded one) so the repair can redistribute
+    a whole sub-load -- a move the one-block relocation cannot make. Bounded so it stays
+    bay-localized and the per-iteration re-pack cost stays affordable."""
+    blocks = prob["blocks"]
+    m = len(prob["bays"])
+    tardy = [j for j, t in perbay.items() if t > 0]
+    if tardy and rng.random() < 0.7:
+        j = max(tardy, key=lambda j: perbay[j])
+    else:
+        loads = [0.0] * m
+        for i, b in cur.items():
+            loads[b] += blocks[i]["workload"]
+        j = max(range(m), key=lambda j: loads[j]) if rng.random() < 0.5 else rng.randrange(m)
+    ids = [i for i in cur if cur[i] == j]
+    if not ids:
+        return _destroy_random(prob, cur, perbay, rng, k)
+    nrm = min(len(ids), rng.randint(k, max(k, 3 * k)))
+    return rng.sample(ids, nrm)
 
 
 # --------------------------------------------------------------------------- #
@@ -273,6 +386,8 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     solution dict (or the best assignment in _return_assignment worker mode)."""
     solver._EVALS = 0
     solver._POOL.clear()
+    _SHAW_SPANS.clear()
+    _SHAW_NEIGHBORS.clear()
     clear_packing_caches()
     t0 = time.time()
     cache: dict = {}
@@ -315,8 +430,17 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     k_max = int(os.environ.get("ALNS_K_MAX", "6"))
     tau = float(os.environ.get("ALNS_REPAIR_TAU", "1.0"))
     band0 = float(os.environ.get("ALNS_RRT_BAND", "0.05"))
-    p_tardy = float(os.environ.get("ALNS_P_TARDY", "0.4"))
-    p_pref = float(os.environ.get("ALNS_P_PREF", "0.4"))
+    # destroy operator weights (relative; normalized by the selector). Default 5-op set;
+    # set ALNS_P_SHAW=0 ALNS_P_BAY=0 to recover the original 3-op set for an A/B.
+    _ops_all = [
+        ("tardy", float(os.environ.get("ALNS_P_TARDY", "0.30")), _destroy_worst_tardy),
+        ("pref", float(os.environ.get("ALNS_P_PREF", "0.25")), _destroy_worst_pref),
+        ("random", float(os.environ.get("ALNS_P_RANDOM", "0.15")), _destroy_random),
+        ("shaw", float(os.environ.get("ALNS_P_SHAW", "0.20")), _destroy_shaw),
+        ("bay", float(os.environ.get("ALNS_P_BAY", "0.0")), _destroy_bay),   # confirmed harmful -> off by default
+    ]
+    destroy_ops = [(nm, pr, fn) for nm, pr, fn in _ops_all if pr > 0]
+    _tot_p = sum(pr for _, pr, _ in destroy_ops) or 1.0
     repair_kind = os.environ.get("ALNS_REPAIR", "softmax")   # softmax | softmax_ls | z1greedy
     n_promising = int(os.environ.get("ALNS_N_PROMISING", "3"))
     ls_patience = int(os.environ.get("ALNS_LS_PATIENCE", "30"))
@@ -328,8 +452,8 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     cur_tot, perbay = solver.total_obj(prob, cur, cache)
     iters = 0
     accepts = 0
-    op_calls = {"tardy": 0, "pref": 0, "random": 0}
-    op_best = {"tardy": 0, "pref": 0, "random": 0}
+    op_calls = {nm: 0 for nm, _, _ in destroy_ops}
+    op_best = {nm: 0 for nm, _, _ in destroy_ops}
     stall = 0
     last_recomb = time.time()
     recomb_attempts = 0
@@ -341,16 +465,15 @@ def alns_solve(prob, timelimit, _return_assignment=False):
         while solver._within(search_dl):
             iters += 1
             k = rng.randint(k_min, k_max)
-            r = rng.random()
-            if r < p_tardy:
-                name = "tardy"
-                removed = _destroy_worst_tardy(prob, cur, perbay, rng, k)
-            elif r < p_tardy + p_pref:
-                name = "pref"
-                removed = _destroy_worst_pref(prob, cur, rng, k)
-            else:
-                name = "random"
-                removed = _destroy_random(prob, cur, rng, k)
+            r = rng.random() * _tot_p
+            acc = 0.0
+            name, fn = destroy_ops[-1][0], destroy_ops[-1][2]
+            for nm, pr, fnc in destroy_ops:
+                acc += pr
+                if r <= acc:
+                    name, fn = nm, fnc
+                    break
+            removed = fn(prob, cur, perbay, rng, k)
             op_calls[name] += 1
             if not removed:
                 continue
