@@ -465,6 +465,9 @@ def find_slot_poly(bay, present_objs, ov_boxfps, bd, bid, W, H, step):
     return None
 
 
+_MARSH_BUF = {}   # reusable grow-only marshaling buffers (2-b: avoid per-call alloc/zeroing)
+
+
 def _find_slot_mask_jit(bay, present_objs, ov_boxmasks, bd, bid, W, H, step, R):
     """Numba-scan find_slot_mask: marshal the present masks into padded uint64 arrays
     ONCE, then scan each orientation entirely inside _scan_mask_orient (removes the
@@ -479,12 +482,28 @@ def _find_slot_mask_jit(bay, present_objs, ov_boxmasks, bd, bid, W, H, step, R):
     else:
         max_h = max_w = 1
     nn = max(1, n)
-    pm_rows = _np.zeros((nn, max_h, max_w), dtype=_np.uint64)
-    pm_h = _np.zeros(nn, dtype=_np.int64)
-    pm_ww = _np.zeros(nn, dtype=_np.int64)
-    pm_ix0 = _np.zeros(nn, dtype=_np.int64)
-    pm_iy0 = _np.zeros(nn, dtype=_np.int64)
-    pm_box = _np.zeros((nn, 4), dtype=_np.float64)
+    # Reusable grow-only buffers: the numba scan only reads pm_rows[p, :pm_h[p], :pm_ww[p]]
+    # for p < n, so an over-sized buffer + stale padding are never read -> behaviour identical,
+    # but we skip the per-call np.zeros allocation + zeroing (~5% of wall). (Per-process buffer;
+    # the portfolio is multi-PROCESS so no cross-thread sharing.)
+    buf = _MARSH_BUF
+    cur = buf.get("rows")
+    if cur is None or cur.shape[0] < nn or cur.shape[1] < max_h or cur.shape[2] < max_w:
+        cn = max(nn, cur.shape[0] if cur is not None else 0)
+        ch = max(max_h, cur.shape[1] if cur is not None else 0)
+        cw = max(max_w, cur.shape[2] if cur is not None else 0)
+        buf["rows"] = _np.empty((cn, ch, cw), dtype=_np.uint64)
+        buf["h"] = _np.empty(cn, dtype=_np.int64)
+        buf["ww"] = _np.empty(cn, dtype=_np.int64)
+        buf["ix0"] = _np.empty(cn, dtype=_np.int64)
+        buf["iy0"] = _np.empty(cn, dtype=_np.int64)
+        buf["box"] = _np.empty((cn, 4), dtype=_np.float64)
+    pm_rows = buf["rows"]
+    pm_h = buf["h"]
+    pm_ww = buf["ww"]
+    pm_ix0 = buf["ix0"]
+    pm_iy0 = buf["iy0"]
+    pm_box = buf["box"]
     for p, (ob_box, ob_mask, ob_mix0, ob_miy0) in enumerate(ov_boxmasks):
         h, wds = ob_mask.height_rows, ob_mask.width_words
         if h and wds:
