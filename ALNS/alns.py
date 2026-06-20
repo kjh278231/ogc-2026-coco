@@ -359,9 +359,16 @@ def _recombine_ortools(prob, best, deadline):
     for k, (j, ids, T) in enumerate(cols):
         model.AddHint(x[k], 1 if (j, ids) in inc else 0)
     cp = _cp_model.CpSolver()
-    cap = float(os.environ.get("SOLVER_RECOMB_SOLVE_S", "8"))
-    cp.parameters.max_time_in_seconds = min(cap, max(0.5, deadline - time.time()))
     cp.parameters.num_search_workers = int(os.environ.get("SOLVER_CP_WORKERS", "4"))
+    cp.parameters.random_seed = int(os.environ.get("SOLVER_SEED", "0"))
+    if deadline is None:
+        # deterministic solve (validation): a DETERMINISTIC-time budget, not wall-clock, so
+        # the recombine is reproducible run-to-run. Pair with SOLVER_CP_WORKERS=1 (parallel
+        # CP-SAT is non-deterministic even with a fixed seed).
+        cp.parameters.max_deterministic_time = float(os.environ.get("SOLVER_RECOMB_DET_T", "120"))
+    else:
+        cap = float(os.environ.get("SOLVER_RECOMB_SOLVE_S", "8"))
+        cp.parameters.max_time_in_seconds = min(cap, max(0.5, deadline - time.time()))
     st = cp.Solve(model)
     if st not in (_cp_model.OPTIMAL, _cp_model.FEASIBLE):
         return best
@@ -405,10 +412,20 @@ def alns_solve(prob, timelimit, _return_assignment=False):
 
     recomb_mode = os.environ.get("ALNS_RECOMB", "off")       # off | final | cyclic
     recomb_cap = float(os.environ.get("ALNS_RECOMB_CAP", "6.0"))
-    recomb_on = _HAS_ORTOOLS and recomb_mode in ("final", "cyclic") and solver._EVAL_LIMIT is None
+    recomb_on = _HAS_ORTOOLS and recomb_mode in ("final", "cyclic")
+    # ALNS_MAX_ITERS>0 = DETERMINISTIC VALIDATION mode: stop after exactly N loop
+    # iterations (no wall-clock dependence) AND still run a deterministic final recombine
+    # (pair with SOLVER_CP_WORKERS=1). This is the canonical reproducible A/B -- unlike the
+    # legacy SOLVER_MAX_EVALS mode it does NOT skip recombine (the dominant lever).
+    det_iters = int(os.environ.get("ALNS_MAX_ITERS", "0"))
 
-    # budget split: leave a build margin in wall mode; eval mode runs to the count.
-    if solver._EVAL_LIMIT is not None:
+    # budget split (3 modes): det-iters validation / legacy eval (recombine skipped) / wall.
+    if det_iters > 0:
+        search_dl = None
+        poly_deadline = None
+        recomb_hardstop = None
+    elif solver._EVAL_LIMIT is not None:
+        recomb_on = False   # legacy eval mode keeps the old search-only determinism
         search_dl = solver._EVAL_LIMIT
         poly_deadline = None
         recomb_hardstop = None
@@ -444,6 +461,10 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     repair_kind = os.environ.get("ALNS_REPAIR", "softmax")   # softmax | softmax_ls | z1greedy
     n_promising = int(os.environ.get("ALNS_N_PROMISING", "3"))
     ls_patience = int(os.environ.get("ALNS_LS_PATIENCE", "30"))
+    # When no bay is tardy, EXCLUDE the tardy operator from selection entirely instead of
+    # letting it fall back to a pref move -- avoids duplicating pref (z1=0 instances) and
+    # keeps the adaptive credit for 'tardy' clean (only scored when it truly targets Z1).
+    tardy_exclude = os.environ.get("ALNS_TARDY_EXCLUDE", "1") not in ("0", "", "false", "off", "no")
     recomb_period = float(os.environ.get("ALNS_RECOMB_PERIOD", "12.0"))  # wall seconds
     recomb_stall = int(os.environ.get("ALNS_RECOMB_STALL", "400"))       # iters w/o new best
     pack_cache: dict = {}
@@ -455,8 +476,10 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     # w_min so no operator is permanently killed. ALNS_ADAPTIVE=0 -> weights never change
     # -> bit-identical to fixed-probability selection.
     adaptive = os.environ.get("ALNS_ADAPTIVE", "0") not in ("0", "", "false", "off", "no")
-    adapt_period = int(os.environ.get("ALNS_ADAPT_PERIOD", "50"))
+    adapt_period = int(os.environ.get("ALNS_ADAPT_PERIOD", "100"))
+    adapt_mode = os.environ.get("ALNS_ADAPT_MODE", "fresh")   # fresh (success-rate + smoothing) | blend
     adapt_react = float(os.environ.get("ALNS_ADAPT_REACT", "0.2"))
+    adapt_smooth = float(os.environ.get("ALNS_ADAPT_SMOOTH", "0.05"))   # per-op probability floor
     sig = (float(os.environ.get("ALNS_ADAPT_S1", "20")),
            float(os.environ.get("ALNS_ADAPT_S2", "10")),
            float(os.environ.get("ALNS_ADAPT_S3", "2")))
@@ -478,18 +501,24 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     recomb_wins = 0
 
     n0 = solver._now()
-    span = max(1e-9, search_dl - n0)
+    span = max(1e-9, (search_dl - n0)) if search_dl is not None else 1.0
     try:
-        while solver._within(search_dl):
+        while (iters < det_iters) if det_iters > 0 else solver._within(search_dl):
             iters += 1
             k = rng.randint(k_min, k_max)
+            if tardy_exclude and not any(t > 0 for t in perbay.values()):
+                elig = [nm for nm, _, _ in destroy_ops if nm != "tardy"]
+            else:
+                elig = [nm for nm, _, _ in destroy_ops]
+            if not elig:
+                elig = [nm for nm, _, _ in destroy_ops]
             tw = 0.0
-            for nm, _, _ in destroy_ops:
+            for nm in elig:
                 tw += weights[nm]
             r = rng.random() * tw
             acc = 0.0
-            name = destroy_ops[-1][0]
-            for nm, _, _ in destroy_ops:
+            name = elig[-1]
+            for nm in elig:
                 acc += weights[nm]
                 if r <= acc:
                     name = nm
@@ -509,8 +538,10 @@ def alns_solve(prob, timelimit, _return_assignment=False):
             else:
                 cand = _repair_softmax(prob, cur, removed, rng, tau)
                 cand_tot, cand_perbay = solver.total_obj(prob, cand, cache)
-            # record-to-record travel: accept within a (decaying) band of the best.
-            band = band0 * max(0.0, 1.0 - (solver._now() - n0) / span)
+            # record-to-record travel: accept within a (decaying) band of the best. Progress
+            # is iteration-based in det mode (no wall dependence), else wall/eval-based.
+            prog = (iters / det_iters) if det_iters > 0 else ((solver._now() - n0) / span)
+            band = band0 * max(0.0, 1.0 - prog)
             prev_best, prev_cur = best_tot, cur_tot
             if cand_tot <= best_tot * (1.0 + band):
                 cur, cur_tot, perbay = cand, cand_tot, cand_perbay
@@ -534,16 +565,32 @@ def alns_solve(prob, timelimit, _return_assignment=False):
                 seg_score[name] += sc
                 seg_use[name] += 1
                 if iters % adapt_period == 0:
+                    if adapt_mode == "fresh":
+                        # success-rate per call this segment, renormalized into a probability
+                        # distribution with an additive (Laplace) smoothing floor so no
+                        # operator's probability ever reaches 0:
+                        #   p[i] = smooth + (1 - smooth*n) * rate[i]/sum(rate)
+                        n_ops = len(weights)
+                        rate = {nm: (seg_score[nm] / seg_use[nm]) if seg_use[nm] > 0 else 0.0
+                                for nm in weights}
+                        rsum = sum(rate.values())
+                        for nm in weights:
+                            if rsum <= 0:
+                                weights[nm] = 1.0 / n_ops
+                            else:
+                                weights[nm] = adapt_smooth + (1.0 - adapt_smooth * n_ops) * (rate[nm] / rsum)
+                    else:   # blend (reaction factor, with a floor)
+                        for nm in weights:
+                            if seg_use[nm] > 0:
+                                weights[nm] = max(w_min, (1.0 - adapt_react) * weights[nm]
+                                                  + adapt_react * (seg_score[nm] / seg_use[nm]))
                     for nm in weights:
-                        if seg_use[nm] > 0:
-                            weights[nm] = max(w_min, (1.0 - adapt_react) * weights[nm]
-                                              + adapt_react * (seg_score[nm] / seg_use[nm]))
                         seg_score[nm] = 0.0
                         seg_use[nm] = 0
             # cyclic set-partitioning master: periodically (or on stagnation) recombine
             # the accumulated column pool into a new global incumbent that the local
             # destroy-repair cannot reach. Guarded -> only adopts a true improvement.
-            if (recomb_on and recomb_mode == "cyclic"
+            if (recomb_on and recomb_mode == "cyclic" and recomb_hardstop is not None
                     and time.time() + recomb_cap < recomb_hardstop
                     and (time.time() - last_recomb >= recomb_period or stall >= recomb_stall)):
                 recomb_attempts += 1
@@ -559,9 +606,9 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     except Exception:
         pass  # keep the best feasible assignment found so far
 
-    # final master recombine (both 'final' and 'cyclic' do one last full-pool solve),
-    # within the reserved slot before the build margin so the final build never truncates.
-    if recomb_on and recomb_hardstop is not None:
+    # final master recombine (both 'final' and 'cyclic' do one last full-pool solve). Wall
+    # mode bounds it by the reserved slot; det-iters mode passes None -> deterministic solve.
+    if recomb_on and (recomb_hardstop is not None or det_iters > 0):
         try:
             recomb_attempts += 1
             A = _recombine_ortools(prob, best, recomb_hardstop)
