@@ -493,12 +493,11 @@ def _recombine(prob, best, deadline):
     return best
 
 
-def _mip_repair(prob, deadline, cache=None):
-    """Production's MIP-repair lever, absorbed into ALNS: a Gurobi assignment MIP that
-    minimizes w2*Z2 + w3*Z3 (a GLOBAL low-preference-loss basin the destroy-repair search /
-    column-pool recombine cannot reach), then a patience-bounded local_search to repair the
-    Z1 it creates. Returns the repaired assignment or None. Deterministic for validation:
-    Threads from SOLVER_CP_WORKERS (=1), fixed Seed, and a WorkLimit when deadline is None."""
+def _mip_assign(prob, deadline):
+    """The Gurobi assignment MIP ONLY (min w2*Z2 + w3*Z3), no Z1 repair -- the cheap probe
+    (~2s) used to gate whether the expensive repair is worth running. Returns the (low-Z3,
+    high-Z1) assignment A or None. Deterministic: Threads=SOLVER_CP_WORKERS(=1) + Seed +
+    WorkLimit when deadline is None."""
     if not solver._HAS_GUROBI:
         return None
     gp, GRB = solver._gp, solver._GRB
@@ -540,17 +539,30 @@ def _mip_repair(prob, deadline, cache=None):
             return None
         A = {i: next(j for j in range(m) if x[i][j].X > 0.5) for i in range(n)}
         md.dispose()
+        return A
     except Exception:
         return None
-    try:   # repair Z1 -> ~0 while keeping low Z3. FULL-sweep convergence (patience=None) --
-           # a small patience stopped far too early (left z1=303 on prob_20). Deterministic
-           # as long as the generous deadline does not bind (convergence happens first).
+
+
+def _mip_repair_z1(prob, A, deadline, cache=None):
+    """Repair the Z1 of a (low-Z3) MIP assignment via FULL-sweep-convergence local_search
+    (patience=None -- a small patience stopped far too early, left z1=303 on prob_20).
+    Deterministic as long as the generous deadline does not bind (convergence happens first)."""
+    try:
         rc = cache if cache is not None else {}
         rdl = (time.time() + 120.0) if deadline is None else deadline
         A2, _ = solver.local_search(prob, A, rc, rdl)
         return A2
     except Exception:
         return A
+
+
+def _mip_repair(prob, deadline, cache=None):
+    """MIP assignment + full Z1 repair (used by the operator)."""
+    A = _mip_assign(prob, deadline)
+    if A is None:
+        return None
+    return _mip_repair_z1(prob, A, deadline, cache)
 
 
 # --------------------------------------------------------------------------- #
@@ -583,16 +595,34 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     # Z1-repaired) as an extra starting incumbent -> ALNS refines around it AND feeds the
     # recombine pool low-Z3 columns. Targets prob_20 (where the column-pool recombine misses
     # the global low-Z3 basin the MIP reaches). One MIP solve at start.
+    # MIP-repair seed with a CHEAP GATE: solve the MIP probe (~2-4s) first, then spend the
+    # expensive Z1 repair ONLY if the MIP's best-case total (w2*Z2 + w3*Z3, Z1 assumed
+    # repairable to ~0) beats the heuristic seed best. a_pref already nails low-Z1/Z3~0
+    # instances (MIP can't beat it -> skip, no wasted budget); it is Z1-overloaded exactly
+    # where the MIP basin wins (prob_20/13) -> spend. stat_mip_seed: 1=spent, -1=gated out.
     stat_mip_seed = 0
     if os.environ.get("ALNS_MIP_SEED", "0") not in ("0", "", "false", "off", "no"):
         _det = int(os.environ.get("ALNS_MAX_ITERS", "0")) > 0 or os.environ.get("SOLVER_MAX_EVALS")
-        mip_dl = None if _det else (t0 + min(8.0, timelimit * 0.15))
-        a = _mip_repair(prob, mip_dl, cache={})
-        if a is not None:
-            tot, _ = solver.total_obj(prob, a, cache)
-            stat_mip_seed = 1
-            if tot < best_tot:
-                best, best_tot = a, tot
+        _wgt = prob["weights"]
+        if _det:
+            solve_dl = rep_dl = None
+        else:
+            solve_dl = t0 + float(os.environ.get("ALNS_MIP_SOLVE_BUDGET", "4"))
+            _rb = os.environ.get("ALNS_MIP_SEED_BUDGET")
+            rep_dl = t0 + (float(_rb) if _rb else min(20.0, timelimit * 0.25))
+        A_mip = _mip_assign(prob, solve_dl)
+        if A_mip is not None:
+            o2, o3 = solver.obj23(prob, A_mip)
+            est = _wgt["w2"] * o2 + _wgt["w3"] * o3   # MIP best-case total (Z1 -> ~0)
+            gate = float(os.environ.get("ALNS_MIP_SEED_GATE", "1.0"))
+            if est < best_tot * gate:
+                a = _mip_repair_z1(prob, A_mip, rep_dl, cache={})
+                tot, _ = solver.total_obj(prob, a, cache)
+                stat_mip_seed = 1
+                if tot < best_tot:
+                    best, best_tot = a, tot
+            else:
+                stat_mip_seed = -1
 
     recomb_mode = os.environ.get("ALNS_RECOMB", "off")       # off | final | cyclic
     recomb_cap = float(os.environ.get("ALNS_RECOMB_CAP", "6.0"))
