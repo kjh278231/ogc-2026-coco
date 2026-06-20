@@ -609,7 +609,12 @@ def alns_solve(prob, timelimit, _return_assignment=False):
         else:
             solve_dl = t0 + float(os.environ.get("ALNS_MIP_SOLVE_BUDGET", "4"))
             _rb = os.environ.get("ALNS_MIP_SEED_BUDGET")
-            rep_dl = t0 + (float(_rb) if _rb else min(20.0, timelimit * 0.25))
+            # budget is a CAP, not a fixed spend: local_search stops at convergence, so the
+            # actual cost = min(convergence_time, budget). The Z1 repair needs ~12-15s to
+            # converge (prob_20), so T*0.15 (=9s @ T=60) cuts it off; T*0.25 (=15s) converges.
+            # Cap at 24s: repair-convergence is instance-size-bound (not timelimit-bound), so
+            # ~24s covers full convergence on any instance -- more is wasted.
+            rep_dl = t0 + (float(_rb) if _rb else min(24.0, timelimit * 0.25))
         A_mip = _mip_assign(prob, solve_dl)
         if A_mip is not None:
             o2, o3 = solver.obj23(prob, A_mip)
