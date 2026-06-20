@@ -375,12 +375,21 @@ class Block:
         Fallback: if the block has no layers (degenerate shape), returns a
         1*1 bounding box anchored at (x, y) so that AABB tests still work.
         """
+        bb = getattr(self, "_bb_cache", None)
+        if bb is not None:
+            return bb
         layers = self.layers_at_pos()
         if not layers:
-            return (float(self.x), float(self.y),
-                    float(self.x) + 1.0, float(self.y) + 1.0)
-        all_verts = [v for layer in layers for v in layer]
-        return _bounding_box(all_verts)
+            bb = (float(self.x), float(self.y),
+                  float(self.x) + 1.0, float(self.y) + 1.0)
+        else:
+            all_verts = [v for layer in layers for v in layer]
+            bb = _bounding_box(all_verts)
+        # Block is immutable after construction (x/y/orient_idx fixed; _layers_cache is
+        # likewise computed once in __post_init__), so the bounding rect is constant ->
+        # lazy-cache it. bounding_rect is the profiled #1 Python hot path (4.47M calls).
+        object.__setattr__(self, "_bb_cache", bb)
+        return bb
 
     # -- Convenience methods --------------------------------------------------
     @classmethod
