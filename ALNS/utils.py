@@ -391,6 +391,17 @@ class Block:
         object.__setattr__(self, "_bb_cache", bb)
         return bb
 
+    def layer_polys(self) -> list:
+        """Per-layer Shapely polygons for this block's placement, lazy-cached. A Block is
+        immutable, so its layer polygons are constant -> build once and reuse across the many
+        check_entry / check_exit evaluations (the crane check previously rebuilt them per
+        (k, j) pair and per call -- the profiled #1 geometry cost after bounding_rect)."""
+        polys = getattr(self, "_poly_cache", None)
+        if polys is None:
+            polys = [_poly_from_verts(layer) for layer in self.layers_at_pos()]
+            object.__setattr__(self, "_poly_cache", polys)
+        return polys
+
     # -- Convenience methods --------------------------------------------------
     @classmethod
     def from_instance(cls, block_id: int, instance: dict,
@@ -698,9 +709,11 @@ def check_entry(bay: Bay, blocks: list[Block],
 
         exist_layers = exist.layers_at_pos()
         n_exist      = len(exist_layers)
+        exist_polys  = exist.layer_polys()
 
-        # Build Shapely polygons for each new-block layer once and reuse across all j
-        new_polys = [_poly_from_verts(new_layers[k]) for k in range(n_new)]
+        # Per-layer polygons of the new block, lazy-cached on the Block (reused across all
+        # j and across every check_entry/check_exit call) instead of rebuilt here.
+        new_polys = new_block.layer_polys()
 
         for k in range(n_new):
             poly_new = new_polys[k]
@@ -710,7 +723,7 @@ def check_entry(bay: Bay, blocks: list[Block],
             # j >= k covers: j==k (final position) and j>k (descent path sweep)
             # j < k never obstructs because existing layer j is below new layer k
             for j in range(k, n_exist):
-                poly_exist = _poly_from_verts(exist_layers[j])
+                poly_exist = exist_polys[j]
                 if poly_exist is None:
                     continue
 
@@ -784,8 +797,9 @@ def check_exit(bay: Bay, blocks: list[Block],
     target_bbox   = target_block.bounding_rect()
     n_target      = len(target_layers)
 
-    # Build Shapely polygons for each target layer once and reuse across all surrounding blocks
-    target_polys = [_poly_from_verts(target_layers[k]) for k in range(n_target)]
+    # Per-layer polygons of the target, lazy-cached on the Block and reused across all
+    # surrounding blocks AND across every check_entry/check_exit call.
+    target_polys = target_block.layer_polys()
 
     for exist in blocks:
         # Skip target block itself (callers may include it in the blocks list)
@@ -798,6 +812,7 @@ def check_exit(bay: Bay, blocks: list[Block],
 
         exist_layers = exist.layers_at_pos()
         n_exist      = len(exist_layers)
+        exist_polys  = exist.layer_polys()
 
         for k in range(n_target):
             poly_target = target_polys[k]
@@ -806,7 +821,7 @@ def check_exit(bay: Bay, blocks: list[Block],
 
             # j >= k covers: j==k (final position) and j>k (ascent path sweep)
             for j in range(k, n_exist):
-                poly_exist = _poly_from_verts(exist_layers[j])
+                poly_exist = exist_polys[j]
                 if poly_exist is None:
                     continue
 
