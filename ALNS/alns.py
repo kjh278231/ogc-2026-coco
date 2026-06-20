@@ -384,6 +384,115 @@ def _recombine_ortools(prob, best, deadline):
     return best
 
 
+def _recombine_gurobi(prob, best, deadline):
+    """Same Z2-aware set-partitioning recombination as _recombine_ortools, but solved with
+    Gurobi (reuses solver's lazy WLS env). Determinism for validation: Threads=1 + fixed
+    Seed + a deterministic WorkLimit when deadline is None (Gurobi's TimeLimit is wall-clock
+    and non-reproducible). Guarded by solver._bestof_obj; same Z3-aligned cost prune."""
+    if not solver._HAS_GUROBI:
+        return best
+    gp, GRB = solver._gp, solver._GRB
+    blocks = prob["blocks"]
+    bays = prob["bays"]
+    m = len(bays)
+    n = len(blocks)
+    w = prob["weights"]
+    SCALE = 100
+    cols = [(j, ids, T) for (j, ids), T in solver._POOL.items() if ids]
+    if not cols:
+        return best
+    per_bay = int(os.environ.get("SOLVER_POOL_PER_BAY", "1000"))
+    if per_bay > 0 and len(cols) > per_bay * m:
+        inc = {(j, tuple(sorted(i for i in best if best[i] == j)))
+               for j in range(m) if any(best[i] == j for i in best)}
+        key = solver._pool_prune_key(prob, T_index=2, ids_index=1)
+        bins = [[] for _ in range(m)]
+        for c in cols:
+            bins[c[0]].append(c)
+        cols = []
+        for j in range(m):
+            b = bins[j]
+            b.sort(key=key)
+            keep = b[:per_bay]
+            kept = {(c[0], c[1]) for c in keep}
+            keep.extend(c for c in b if (c[0], c[1]) in inc and (c[0], c[1]) not in kept)
+            cols.extend(keep)
+    model = gp.Model(env=solver._grb_env())
+    x = [model.addVar(vtype=GRB.BINARY, name=f"c{k}") for k in range(len(cols))]
+    by_block = [[] for _ in range(n)]
+    by_bay = [[] for _ in range(m)]
+    wl = []
+    cost = []
+    for k, (j, ids, T) in enumerate(cols):
+        for i in ids:
+            by_block[i].append(k)
+        by_bay[j].append(k)
+        wl.append(sum(blocks[i]["workload"] for i in ids))
+        pl = sum(max(blocks[i]["bay_preferences"]) - blocks[i]["bay_preferences"][j] for i in ids)
+        cost.append(int(SCALE * (w["w1"] * T + w["w3"] * pl)))
+    for i in range(n):
+        if not by_block[i]:
+            model.dispose()
+            return best
+        model.addConstr(gp.quicksum(x[k] for k in by_block[i]) == 1)
+    for j in range(m):
+        if by_bay[j]:
+            model.addConstr(gp.quicksum(x[k] for k in by_bay[j]) <= 1)
+    obj = gp.quicksum(cost[k] * x[k] for k in range(len(cols)))
+    if m >= 2:
+        areas = [b["width"] * b["height"] for b in bays]
+        avg = sum(areas) / m
+        cj = [round(avg / areas[j] * SCALE) for j in range(m)]
+        sload = [gp.quicksum(cj[j] * wl[k] * x[k] for k in by_bay[j]) for j in range(m)]
+        M = model.addVar(lb=0, ub=10 ** 12, vtype=GRB.INTEGER, name="M")
+        for a in range(m):
+            for b in range(m):
+                if a != b:
+                    model.addConstr(M >= sload[a] - sload[b])
+        obj = obj + w["w2"] * M
+    model.setObjective(obj, GRB.MINIMIZE)
+    inc = {(j, tuple(sorted(i for i in best if best[i] == j)))
+           for j in range(m) if any(best[i] == j for i in best)}
+    for k, (j, ids, T) in enumerate(cols):
+        x[k].Start = 1 if (j, ids) in inc else 0
+    model.Params.Threads = int(os.environ.get("SOLVER_CP_WORKERS", "4"))
+    model.Params.Seed = int(os.environ.get("SOLVER_SEED", "0"))
+    if deadline is None:
+        # deterministic work-unit budget (reproducible), not wall-clock TimeLimit
+        model.Params.WorkLimit = float(os.environ.get("SOLVER_RECOMB_DET_W", "60"))
+    else:
+        cap = float(os.environ.get("SOLVER_RECOMB_SOLVE_S", "8"))
+        model.Params.TimeLimit = min(cap, max(0.5, deadline - time.time()))
+    model.optimize()
+    if model.SolCount == 0:
+        model.dispose()
+        return best
+    A = {}
+    for k, (j, ids, T) in enumerate(cols):
+        if x[k].X > 0.5:
+            for i in ids:
+                A[i] = j
+    model.dispose()
+    if len(A) != n:
+        return best
+    if solver._bestof_obj(prob, A, deadline) < solver._bestof_obj(prob, best, deadline) - 1e-9:
+        return A
+    return best
+
+
+def _recombine(prob, best, deadline):
+    """Dispatch to the configured recombine backend (ALNS_RECOMB_BACKEND, default gurobi),
+    falling back to whichever solver is available."""
+    backend = os.environ.get("ALNS_RECOMB_BACKEND", "gurobi")
+    if backend == "gurobi" and solver._HAS_GUROBI:
+        return _recombine_gurobi(prob, best, deadline)
+    if _HAS_ORTOOLS:
+        return _recombine_ortools(prob, best, deadline)
+    if solver._HAS_GUROBI:
+        return _recombine_gurobi(prob, best, deadline)
+    return best
+
+
 # --------------------------------------------------------------------------- #
 # main solve
 # --------------------------------------------------------------------------- #
@@ -412,7 +521,7 @@ def alns_solve(prob, timelimit, _return_assignment=False):
 
     recomb_mode = os.environ.get("ALNS_RECOMB", "off")       # off | final | cyclic
     recomb_cap = float(os.environ.get("ALNS_RECOMB_CAP", "6.0"))
-    recomb_on = _HAS_ORTOOLS and recomb_mode in ("final", "cyclic")
+    recomb_on = recomb_mode in ("final", "cyclic") and (solver._HAS_GUROBI or _HAS_ORTOOLS)
     # ALNS_MAX_ITERS>0 = DETERMINISTIC VALIDATION mode: stop after exactly N loop
     # iterations (no wall-clock dependence) AND still run a deterministic final recombine
     # (pair with SOLVER_CP_WORKERS=1). This is the canonical reproducible A/B -- unlike the
@@ -594,7 +703,7 @@ def alns_solve(prob, timelimit, _return_assignment=False):
                     and time.time() + recomb_cap < recomb_hardstop
                     and (time.time() - last_recomb >= recomb_period or stall >= recomb_stall)):
                 recomb_attempts += 1
-                A = _recombine_ortools(prob, best, time.time() + recomb_cap)
+                A = _recombine(prob, best, time.time() + recomb_cap)
                 if A is not best:
                     a_tot, a_perbay = solver.total_obj(prob, A, cache)
                     if a_tot < best_tot - 1e-9:
@@ -611,7 +720,7 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     if recomb_on and (recomb_hardstop is not None or det_iters > 0):
         try:
             recomb_attempts += 1
-            A = _recombine_ortools(prob, best, recomb_hardstop)
+            A = _recombine(prob, best, recomb_hardstop)
             if A is not best:
                 a_tot, _ = solver.total_obj(prob, A, cache)
                 if a_tot < best_tot - 1e-9:
