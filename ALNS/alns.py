@@ -493,6 +493,66 @@ def _recombine(prob, best, deadline):
     return best
 
 
+def _mip_repair(prob, deadline, cache=None):
+    """Production's MIP-repair lever, absorbed into ALNS: a Gurobi assignment MIP that
+    minimizes w2*Z2 + w3*Z3 (a GLOBAL low-preference-loss basin the destroy-repair search /
+    column-pool recombine cannot reach), then a patience-bounded local_search to repair the
+    Z1 it creates. Returns the repaired assignment or None. Deterministic for validation:
+    Threads from SOLVER_CP_WORKERS (=1), fixed Seed, and a WorkLimit when deadline is None."""
+    if not solver._HAS_GUROBI:
+        return None
+    gp, GRB = solver._gp, solver._GRB
+    blocks = prob["blocks"]
+    bays = prob["bays"]
+    w = prob["weights"]
+    n = len(blocks)
+    m = len(bays)
+    try:
+        areas = [b["width"] * b["height"] for b in bays]
+        avg = sum(areas) / m
+        u = [avg / areas[j] for j in range(m)]
+        md = gp.Model(env=solver._grb_env())
+        x = [[md.addVar(vtype=GRB.BINARY) for j in range(m)] for i in range(n)]
+        for i in range(n):
+            md.addConstr(gp.quicksum(x[i][j] for j in range(m)) == 1)
+            for j in range(m):
+                if not fits(blocks[i], bays[j]):
+                    md.addConstr(x[i][j] == 0)
+        load = [gp.quicksum(blocks[i]["workload"] * x[i][j] for i in range(n)) for j in range(m)]
+        Mv = md.addVar(lb=0)
+        for a in range(m):
+            for b in range(m):
+                if a != b:
+                    md.addConstr(Mv >= u[a] * load[a] - u[b] * load[b])
+        pref = gp.quicksum(
+            (max(blocks[i]["bay_preferences"]) - blocks[i]["bay_preferences"][j]) * x[i][j]
+            for i in range(n) for j in range(m))
+        md.setObjective(w["w2"] * Mv + w["w3"] * pref, GRB.MINIMIZE)
+        md.Params.Threads = int(os.environ.get("SOLVER_CP_WORKERS", "4"))
+        md.Params.Seed = int(os.environ.get("SOLVER_SEED", "0"))
+        if deadline is None:
+            md.Params.WorkLimit = float(os.environ.get("SOLVER_MIP_DET_W", "30"))
+        else:
+            md.Params.TimeLimit = max(0.5, deadline - time.time())
+        md.optimize()
+        if md.SolCount == 0:
+            md.dispose()
+            return None
+        A = {i: next(j for j in range(m) if x[i][j].X > 0.5) for i in range(n)}
+        md.dispose()
+    except Exception:
+        return None
+    try:   # repair Z1 -> ~0 while keeping low Z3. FULL-sweep convergence (patience=None) --
+           # a small patience stopped far too early (left z1=303 on prob_20). Deterministic
+           # as long as the generous deadline does not bind (convergence happens first).
+        rc = cache if cache is not None else {}
+        rdl = (time.time() + 120.0) if deadline is None else deadline
+        A2, _ = solver.local_search(prob, A, rc, rdl)
+        return A2
+    except Exception:
+        return A
+
+
 # --------------------------------------------------------------------------- #
 # main solve
 # --------------------------------------------------------------------------- #
@@ -518,6 +578,21 @@ def alns_solve(prob, timelimit, _return_assignment=False):
         tot, _ = solver.total_obj(prob, a, cache)
         if tot < best_tot:
             best, best_tot = a, tot
+
+    # MIP-repair SEED (ALNS_MIP_SEED): add the production MIP-repair basin (global low-Z3,
+    # Z1-repaired) as an extra starting incumbent -> ALNS refines around it AND feeds the
+    # recombine pool low-Z3 columns. Targets prob_20 (where the column-pool recombine misses
+    # the global low-Z3 basin the MIP reaches). One MIP solve at start.
+    stat_mip_seed = 0
+    if os.environ.get("ALNS_MIP_SEED", "0") not in ("0", "", "false", "off", "no"):
+        _det = int(os.environ.get("ALNS_MAX_ITERS", "0")) > 0 or os.environ.get("SOLVER_MAX_EVALS")
+        mip_dl = None if _det else (t0 + min(8.0, timelimit * 0.15))
+        a = _mip_repair(prob, mip_dl, cache={})
+        if a is not None:
+            tot, _ = solver.total_obj(prob, a, cache)
+            stat_mip_seed = 1
+            if tot < best_tot:
+                best, best_tot = a, tot
 
     recomb_mode = os.environ.get("ALNS_RECOMB", "off")       # off | final | cyclic
     recomb_cap = float(os.environ.get("ALNS_RECOMB_CAP", "6.0"))
@@ -576,6 +651,9 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     tardy_exclude = os.environ.get("ALNS_TARDY_EXCLUDE", "1") not in ("0", "", "false", "off", "no")
     recomb_period = float(os.environ.get("ALNS_RECOMB_PERIOD", "12.0"))  # wall seconds
     recomb_stall = int(os.environ.get("ALNS_RECOMB_STALL", "400"))       # iters w/o new best
+    mip_op = os.environ.get("ALNS_MIP_OP", "0") not in ("0", "", "false", "off", "no")
+    mip_op_period = int(os.environ.get("ALNS_MIP_OP_PERIOD", "500"))     # iters between injections
+    mip_op_cap = float(os.environ.get("ALNS_MIP_OP_CAP", "5.0"))         # wall cap per solve
     pack_cache: dict = {}
 
     # Adaptive operator selection (ALNS "A"): roulette by weights learned from recent
@@ -608,6 +686,8 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     last_recomb = time.time()
     recomb_attempts = 0
     recomb_wins = 0
+    mip_op_attempts = 0
+    mip_op_wins = 0
 
     n0 = solver._now()
     span = max(1e-9, (search_dl - n0)) if search_dl is not None else 1.0
@@ -712,6 +792,19 @@ def alns_solve(prob, timelimit, _return_assignment=False):
                         recomb_wins += 1
                 last_recomb = time.time()
                 stall = 0
+            # MIP-repair OPERATOR (ALNS_MIP_OP): periodically re-inject the global low-Z3
+            # basin (guarded). Det mode -> deterministic WorkLimit; wall -> time-guarded.
+            if (mip_op and iters % mip_op_period == 0
+                    and (det_iters > 0 or (recomb_hardstop is not None
+                                           and time.time() + mip_op_cap < recomb_hardstop))):
+                mip_op_attempts += 1
+                A = _mip_repair(prob, None if det_iters > 0 else time.time() + mip_op_cap, cache)
+                if A is not None:
+                    a_tot, a_perbay = solver.total_obj(prob, A, cache)
+                    if a_tot < best_tot - 1e-9:
+                        best, best_tot = dict(A), a_tot
+                        cur, cur_tot, perbay = dict(A), a_tot, a_perbay
+                        mip_op_wins += 1
     except Exception:
         pass  # keep the best feasible assignment found so far
 
@@ -733,6 +826,8 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     LAST_STATS.update({"iters": iters, "accepts": accepts, "evals": solver._EVALS,
                        "op_calls": dict(op_calls), "op_best": dict(op_best),
                        "recomb_attempts": recomb_attempts, "recomb_wins": recomb_wins,
+                       "mip_seed": stat_mip_seed, "mip_op_attempts": mip_op_attempts,
+                       "mip_op_wins": mip_op_wins,
                        "weights": {nm: round(weights[nm], 3) for nm in weights},
                        "best_tot_proxy": best_tot})
     if _return_assignment:
