@@ -448,6 +448,24 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     recomb_stall = int(os.environ.get("ALNS_RECOMB_STALL", "400"))       # iters w/o new best
     pack_cache: dict = {}
 
+    # Adaptive operator selection (ALNS "A"): roulette by weights learned from recent
+    # performance. weights start at the configured probs (sensible prior); when adaptive,
+    # they are nudged every adapt_period iters toward each operator's average segment score
+    # (new global best=s1, improved current=s2, accepted-worse=s3, rejected=0), floored at
+    # w_min so no operator is permanently killed. ALNS_ADAPTIVE=0 -> weights never change
+    # -> bit-identical to fixed-probability selection.
+    adaptive = os.environ.get("ALNS_ADAPTIVE", "0") not in ("0", "", "false", "off", "no")
+    adapt_period = int(os.environ.get("ALNS_ADAPT_PERIOD", "50"))
+    adapt_react = float(os.environ.get("ALNS_ADAPT_REACT", "0.2"))
+    sig = (float(os.environ.get("ALNS_ADAPT_S1", "20")),
+           float(os.environ.get("ALNS_ADAPT_S2", "10")),
+           float(os.environ.get("ALNS_ADAPT_S3", "2")))
+    w_min = float(os.environ.get("ALNS_ADAPT_WMIN", "0.05"))
+    weights = {nm: pr for nm, pr, _ in destroy_ops}
+    fn_by_name = {nm: fn for nm, _, fn in destroy_ops}
+    seg_score = {nm: 0.0 for nm in weights}
+    seg_use = {nm: 0 for nm in weights}
+
     cur = dict(best)
     cur_tot, perbay = solver.total_obj(prob, cur, cache)
     iters = 0
@@ -465,15 +483,18 @@ def alns_solve(prob, timelimit, _return_assignment=False):
         while solver._within(search_dl):
             iters += 1
             k = rng.randint(k_min, k_max)
-            r = rng.random() * _tot_p
+            tw = 0.0
+            for nm, _, _ in destroy_ops:
+                tw += weights[nm]
+            r = rng.random() * tw
             acc = 0.0
-            name, fn = destroy_ops[-1][0], destroy_ops[-1][2]
-            for nm, pr, fnc in destroy_ops:
-                acc += pr
+            name = destroy_ops[-1][0]
+            for nm, _, _ in destroy_ops:
+                acc += weights[nm]
                 if r <= acc:
-                    name, fn = nm, fnc
+                    name = nm
                     break
-            removed = fn(prob, cur, perbay, rng, k)
+            removed = fn_by_name[name](prob, cur, perbay, rng, k)
             op_calls[name] += 1
             if not removed:
                 continue
@@ -490,6 +511,7 @@ def alns_solve(prob, timelimit, _return_assignment=False):
                 cand_tot, cand_perbay = solver.total_obj(prob, cand, cache)
             # record-to-record travel: accept within a (decaying) band of the best.
             band = band0 * max(0.0, 1.0 - (solver._now() - n0) / span)
+            prev_best, prev_cur = best_tot, cur_tot
             if cand_tot <= best_tot * (1.0 + band):
                 cur, cur_tot, perbay = cand, cand_tot, cand_perbay
                 accepts += 1
@@ -499,6 +521,25 @@ def alns_solve(prob, timelimit, _return_assignment=False):
                 stall = 0
             else:
                 stall += 1
+            # adaptive scoring: reward this operator by outcome quality, update periodically.
+            if adaptive:
+                if cand_tot < prev_best - 1e-9:
+                    sc = sig[0]
+                elif cand_tot < prev_cur - 1e-9:
+                    sc = sig[1]
+                elif cand_tot <= prev_best * (1.0 + band):
+                    sc = sig[2]
+                else:
+                    sc = 0.0
+                seg_score[name] += sc
+                seg_use[name] += 1
+                if iters % adapt_period == 0:
+                    for nm in weights:
+                        if seg_use[nm] > 0:
+                            weights[nm] = max(w_min, (1.0 - adapt_react) * weights[nm]
+                                              + adapt_react * (seg_score[nm] / seg_use[nm]))
+                        seg_score[nm] = 0.0
+                        seg_use[nm] = 0
             # cyclic set-partitioning master: periodically (or on stagnation) recombine
             # the accumulated column pool into a new global incumbent that the local
             # destroy-repair cannot reach. Guarded -> only adopts a true improvement.
@@ -536,6 +577,7 @@ def alns_solve(prob, timelimit, _return_assignment=False):
     LAST_STATS.update({"iters": iters, "accepts": accepts, "evals": solver._EVALS,
                        "op_calls": dict(op_calls), "op_best": dict(op_best),
                        "recomb_attempts": recomb_attempts, "recomb_wins": recomb_wins,
+                       "weights": {nm: round(weights[nm], 3) for nm in weights},
                        "best_tot_proxy": best_tot})
     if _return_assignment:
         return best, dict(best)
