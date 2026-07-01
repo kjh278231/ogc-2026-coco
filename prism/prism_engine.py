@@ -213,11 +213,20 @@ def _refine(prob, anchor, cache, dl, L, rng=None):
     # so different worker seeds diverge into different basins (restart diversity). This is
     # what lets the portfolio escape deterministic traps (e.g. T1, where one shared seed
     # left every worker stuck in the same Z1=1 basin -> +167%); BRIDGE gets this from div01.
+    # Z1=0 phase-transition Z3 refinement (SOLVER_SWAP): after each LAHC descent reaches its
+    # (Z1=0) local optimum, run guided SWAP moves to drive Z3 down further while preserving Z1=0
+    # -- reaching mutual-preference exchanges relocation+recombine miss (K._z3_refine). Converges
+    # fast (few swaps) so it does not hog the ILS budget; Pareto-safe.
+    _swap = K._env_flag("SOLVER_SWAP")
     best, best_tot = K._climb_lahc(prob, A0, cache, dl, L, rng=rng)
+    if _swap:
+        best, best_tot = K._z3_refine(prob, best, cache, dl)
     # ILS loop: spend the rest of the budget instead of idling after the first plateau.
     while K._within(dl):
         cand = K._perturb(prob, best, cache, rng)
         cur, tot = K._climb_lahc(prob, cand, cache, dl, L, rng=rng)
+        if _swap:
+            cur, tot = K._z3_refine(prob, cur, cache, dl)
         if tot < best_tot - 1e-9:
             best, best_tot = cur, tot
     return best, best_tot

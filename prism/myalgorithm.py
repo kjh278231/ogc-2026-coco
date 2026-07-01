@@ -19,6 +19,13 @@ def algorithm(prob_info, timelimit=60):
     # 111752, T18 72839->65949, T20 223903->149050 -- 6/6 wins, aggregate -31%. Pareto-safe per
     # bay (EDD always in the set). See bridge/packing.py:solve_bay_best, SOLVER_MO_ORDERS.
     os.environ.setdefault("SOLVER_MULTIORDER", "1")
+    # Z1=0 phase-transition Z3 refinement via guided SWAP moves (see prism_engine._refine ->
+    # K._z3_refine). Once a descent reaches Z1=0, the near-lexicographic objective means the game
+    # is minimising Z3 while keeping Z1=0; the relocation-only search + recombine miss mutual-
+    # preference exchanges that swaps reach. Validated: swaps improve the full recombined
+    # multi-order solution -6..-54% (tools/_swap_probe2.py), and PRISM+MO eval-count T13
+    # 404,238 -> 117,545 (-71%) with SWAP on. Pareto-safe; env-rollbackable.
+    os.environ.setdefault("SOLVER_SWAP", "1")
     os.environ.setdefault("PRISM_PORTFOLIO", "1")
     # Gate lowered 180 -> 45: the anchor-portfolio gives each of 4 workers the FULL budget on
     # its own core, so it BEATS the single-process even-split at every budget tested (T=60:
@@ -38,6 +45,6 @@ def algorithm(prob_info, timelimit=60):
         # last-resort guaranteed-feasible fallback (pure AABB, most-preferred bay).
         import solver as K
         os.environ["SOLVER_NOPOLY"] = "1"
-        for _k in ("SOLVER_MASK", "SOLVER_MASK_SEARCH", "SOLVER_MULTIORDER"):
+        for _k in ("SOLVER_MASK", "SOLVER_MASK_SEARCH", "SOLVER_MULTIORDER", "SOLVER_SWAP"):
             os.environ.pop(_k, None)
         return K.build_solution(prob_info, K.a_pref(prob_info))

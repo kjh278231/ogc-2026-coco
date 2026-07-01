@@ -463,6 +463,65 @@ def _ils(prob, best, best_tot, cache, deadline, rng):
     return best, best_tot
 
 
+def _z3_refine(prob, assign, cache, deadline):
+    """Z1=0 phase-transition Z3 refinement via GUIDED SWAP moves (env SOLVER_SWAP).
+
+    The objective is near-lexicographic (w1 >> w3 >> w2), so once the incumbent reaches Z1=0
+    the game is: minimise Z3 (preference) WHILE keeping Z1=0. The assignment search only ever
+    RELOCATES one block at a time; two blocks that each prefer the other's bay cannot be fixed
+    by relocation (moving either alone crowds a bay -> Z1>0 -> rejected) nor always by recombine
+    (it recombines only bay-pieces it has seen). A SWAP (exchange i<->k between their bays)
+    reaches those mutual-preference states. Validated: swaps improve even the full
+    improved+LAHC+recombine+multi-order converged solution by -6..-54% on the hard family, all
+    via Z3 (tools/_swap_probe2.py).
+
+    Guided + cheap: only pairs whose exchange LOWERS the Z3 penalty are candidates (identified by
+    arithmetic on the preference vectors, no packing), tried highest-Z3-gain first; each candidate
+    is accepted only if the full multi-order-packed total_obj improves -> so a swap that would
+    reintroduce tardiness (crowd a bay) is rejected, i.e. Z1=0 is preserved. First-improving with
+    re-generation after each accept. Pareto-safe (keeps a running incumbent; only total-improving
+    moves accepted) and deterministic (candidates sorted by (-gain, i, k)) for eval-count A/B."""
+    blocks = prob["blocks"]
+    bays = prob["bays"]
+    pref = [b["bay_preferences"] for b in blocks]
+    cur = dict(assign)
+    cur_tot, _ = total_obj(prob, cur, cache)
+    improved = True
+    while improved and _within(deadline):
+        improved = False
+        ids = list(cur)
+        cands = []
+        for a_ in range(len(ids)):
+            i = ids[a_]
+            bi = cur[i]
+            pi = pref[i]
+            for b_ in range(a_ + 1, len(ids)):
+                k = ids[b_]
+                bk = cur[k]
+                if bi == bk:
+                    continue
+                # Z3-penalty drop from swapping (higher preference in the exchanged bays):
+                gain = (pi[bk] + pref[k][bi]) - (pi[bi] + pref[k][bk])
+                if gain > 0 and fits(blocks[i], bays[bk]) and fits(blocks[k], bays[bi]):
+                    cands.append((gain, i, k))
+        if not cands:
+            break
+        cands.sort(key=lambda c: (-c[0], c[1], c[2]))
+        for _gain, i, k in cands:
+            if not _within(deadline):
+                break
+            if cur[i] == cur[k]:                 # bays changed by an earlier accepted swap
+                continue
+            trial = dict(cur)
+            trial[i], trial[k] = cur[k], cur[i]
+            t, _ = total_obj(prob, trial, cache)
+            if t < cur_tot - 1e-9:               # accept only if the packed objective improves
+                cur, cur_tot = trial, t
+                improved = True
+                break                            # re-generate candidates from the new state
+    return cur, cur_tot
+
+
 def _bestof_obj(prob, assign, deadline=None):
     """Full objective on the SAME per-bay model the final build uses (_score_and_pack):
     supercover-mask ONLY when SOLVER_MASK is on -- matching the search proxy exactly so

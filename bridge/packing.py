@@ -695,6 +695,28 @@ def _order_candidates(prob, ids):
     return [builders[n]() for n in names]
 
 
+def _best_order_pack(prob, j, ids, step=2, tcap=200, poly=False, deadline=None,
+                     mask=False, mask_R=8):
+    """Best of the multi-order set -> (order, placed, T, exits). EDD first (return immediately
+    if it packs on time), else also try release / least-slack / area-desc and keep the min."""
+    cands = _order_candidates(prob, ids)
+    best_o = cands[0]
+    placed = solve_bay(prob, j, ids, step, tcap, poly, deadline, mask, mask_R, order=best_o)
+    T, exits = extract_tardiness(prob, j, placed)
+    if T <= 1e-9:
+        return best_o, placed, T, exits
+    for od in cands[1:]:
+        if deadline is not None and time.time() > deadline:
+            break
+        pl = solve_bay(prob, j, ids, step, tcap, poly, deadline, mask, mask_R, order=od)
+        Tt, ex = extract_tardiness(prob, j, pl)
+        if Tt < T - 1e-9:
+            best_o, placed, T, exits = od, pl, Tt, ex
+            if T <= 1e-9:
+                break
+    return best_o, placed, T, exits
+
+
 def solve_bay_best(prob, j, ids, step=2, tcap=200, poly=False, deadline=None,
                    mask=False, mask_R=8):
     """Best-of multi-order pack -> (placed, T, exits). Packs the EDD order first; if it is
@@ -703,21 +725,46 @@ def solve_bay_best(prob, j, ids, step=2, tcap=200, poly=False, deadline=None,
     so the result is Pareto-safe (>= the single-order baseline never). Cheap: most bays
     pack T=0 on EDD and return immediately; only contended bays pay the extra packs, and
     poly/mask escalation + the `deadline` cap behave exactly as in solve_bay."""
-    cands = _order_candidates(prob, ids)
-    placed = solve_bay(prob, j, ids, step, tcap, poly, deadline, mask, mask_R, order=cands[0])
-    T, exits = extract_tardiness(prob, j, placed)
+    _, placed, T, exits = _best_order_pack(prob, j, ids, step, tcap, poly, deadline, mask, mask_R)
+    return placed, T, exits
+
+
+def solve_bay_ls(prob, j, ids, step=2, tcap=200, poly=False, deadline=None,
+                 mask=False, mask_R=8, swaps=None, seed=0):
+    """Order LOCAL SEARCH pack -> (placed, T, exits). Start from the best of the 4 orders, then
+    hill-climb by swapping two positions in the placement order (re-pack, keep the swap only if
+    it lowers tardiness) until `swaps` trials or `deadline`. Since it starts from the best-of-4
+    (which includes EDD) and keeps only improvements, the result is STRICTLY Pareto-safe: the
+    packed tardiness can only drop, never rise -- and it never touches the search trajectory
+    (final-build refinement only), so unlike the search-affecting multi-order lever it carries
+    NO regression risk on the emitted objective. Order is the dominant Z1 lever (contention),
+    and the 4 fixed orders leave headroom the hill-climb recovers (~ -26% on tardy-bay Z1 in
+    tools/_order_ls_probe.py). Only fires on contended bays (T>0)."""
+    import random as _random
+    best_o, placed, T, exits = _best_order_pack(
+        prob, j, ids, step, tcap, poly, deadline, mask, mask_R)
     if T <= 1e-9:
         return placed, T, exits
-    for od in cands[1:]:
+    n = len(best_o)
+    if n < 2:
+        return placed, T, exits
+    budget = swaps if swaps is not None else int(os.environ.get("SOLVER_ORDER_LS_SWAPS", "200"))
+    rng = _random.Random(seed * 1_000_003 + j)
+    cur = list(best_o); curT = T
+    for _ in range(budget):
+        if curT <= 1e-9:
+            break
         if deadline is not None and time.time() > deadline:
             break
-        pl = solve_bay(prob, j, ids, step, tcap, poly, deadline, mask, mask_R, order=od)
+        a = rng.randrange(n); b = rng.randrange(n)
+        if a == b:
+            continue
+        trial = list(cur); trial[a], trial[b] = trial[b], trial[a]
+        pl = solve_bay(prob, j, ids, step, tcap, poly, deadline, mask, mask_R, order=trial)
         Tt, ex = extract_tardiness(prob, j, pl)
-        if Tt < T - 1e-9:
-            placed, T, exits = pl, Tt, ex
-            if T <= 1e-9:
-                break
-    return placed, T, exits
+        if Tt < curT - 1e-9:
+            cur, curT, placed, exits = trial, Tt, pl, ex
+    return placed, curT, exits
 
 
 def extract_tardiness(prob, j, placed):
