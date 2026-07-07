@@ -522,6 +522,77 @@ def _z3_refine(prob, assign, cache, deadline):
     return cur, cur_tot
 
 
+def _ec_target(prob, cur, i, avoid):
+    blocks = prob["blocks"]; bays = prob["bays"]; p = blocks[i]["bay_preferences"]
+    for j in sorted(range(len(bays)), key=lambda j: -p[j]):
+        if j != avoid and j != cur[i] and fits(blocks[i], bays[j]):
+            return j
+    return None
+
+
+def _ejection_chain(prob, assign, cache, seed_i, max_len=6):
+    """One preference-guided ejection chain (the k-opt generalisation of swap): move seed_i
+    toward its preferred bay and PASS the resulting crowding along a chain of relocations until
+    it dissipates in a bay with slack. Accept the closed chain only if the packed total_obj
+    improves (Z1 kept ~0). Reaches Z1=0 states single relocation + pairwise swap cannot."""
+    cur = dict(assign)
+    orig, _ = total_obj(prob, cur, cache)
+    moved = set()
+    i = seed_i
+    target = _ec_target(prob, cur, i, None)
+    if target is None:
+        return None, None
+    closed = False
+    for _ in range(max_len):
+        cur[i] = target
+        moved.add(i)
+        _, perbay = total_obj(prob, cur, cache)
+        if perbay.get(target, 0) <= 1e-9:
+            closed = True
+            break
+        cands = [j for j in cur if cur[j] == target and j not in moved]
+        if not cands:
+            return None, None
+        j = min(cands, key=lambda j: prob["blocks"][j]["bay_preferences"][target])
+        nt = _ec_target(prob, cur, j, target)
+        if nt is None:
+            return None, None
+        i, target = j, nt
+    if not closed:
+        return None, None
+    tot, _ = total_obj(prob, cur, cache)
+    return (cur, tot) if tot < orig - 1e-9 else (None, None)
+
+
+def _ejection_refine(prob, assign, cache, deadline, max_len=6):
+    """Drive ejection chains to a local optimum (env SOLVER_EJECTION; default OFF -> bit-identical).
+    The decisive lever behind WEAVE's Z1=0 advantage over PRISM at equal evals: single relocation
+    crowds a bay (Z1>0, rejected) and swap only fixes mutual-preference pairs, but a chain relocates
+    the seed toward its preferred bay and passes crowding along until it dissipates. Pareto-safe
+    (accept only if total_obj improves); deterministic (seeds by descending Z3 gain)."""
+    blocks = prob["blocks"]
+    m = len(prob["bays"])
+    pref_bay = {i: max(range(m), key=lambda j: blocks[i]["bay_preferences"][j])
+                for i in range(len(blocks))}
+    cur = dict(assign)
+    cur_tot, _ = total_obj(prob, cur, cache)
+    improved = True
+    while improved and _within(deadline):
+        improved = False
+        seeds = sorted((i for i in cur if cur[i] != pref_bay[i]),
+                       key=lambda i: -(blocks[i]["bay_preferences"][pref_bay[i]]
+                                       - blocks[i]["bay_preferences"][cur[i]]))
+        for i in seeds:
+            if not _within(deadline):
+                break
+            new, tot = _ejection_chain(prob, cur, cache, i, max_len=max_len)
+            if new is not None and tot < cur_tot - 1e-9:
+                cur, cur_tot = new, tot
+                improved = True
+                break
+    return cur, cur_tot
+
+
 def _bestof_obj(prob, assign, deadline=None):
     """Full objective on the SAME per-bay model the final build uses (_score_and_pack):
     supercover-mask ONLY when SOLVER_MASK is on -- matching the search proxy exactly so

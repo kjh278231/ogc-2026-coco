@@ -201,6 +201,10 @@ def portfolio_solve(prob, timelimit):
             try:
                 K._EVAL_LIMIT = None
                 import random as _rnd
+                # (Tried ejection-chain in the guarded idle-reclaim: NO-OP -- the final best is already
+                # an ejection local optimum, so polishing it finds nothing. Ejection's T13 win comes
+                # from workers running it DURING refinement into different basins, which costs worker
+                # budget and regressed T20 +1.4%. Instance-split, no free lunch -> not adopted.)
                 A2, _, _ = P.refine_anchor(prob, best_asg, idle_dl - time.time(),
                                            L=L, seed=20260629)
                 obj2, packed2 = K._score_and_pack(prob, A2, poly_deadline=poly_dl)
