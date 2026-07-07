@@ -126,3 +126,59 @@ is consistent across variants.
 **Final default verification (07-07, `_val5_*`):** defaults (JITS=0) reproduce the v1
 optima exactly — T13@180 = 112,234, T17@60 = 63,162; `ACCORD_JITS=3` reproduces the T17
 kick win (59,096). Shipped on branch `accord-solver`.
+
+## 07-07 — v2 = saturation refine-tail (ACCORD_REFINE, default ON): 5/6 improved, 0
+regressions, single-core ACCORD now 3W/2T/1L vs the 4-core champion
+
+Design origin: the trajectory data above, quantified — of each run's iterations, the
+share AFTER the last new best is 54-100% (T1 100% [last best at it 4 of 4,629!], T17
+92%, T13@180 84%, T18 65%, T11 64%, T20 68% — but T20's max gap between successive
+bests is only 15 with 84 total iters, i.e. NOT saturated, just short). Largest observed
+gap between successive bests anywhere: 85 (T17). → **patience = 120 iterations without
+a new best ⇒ the loop is saturated**; hand the remaining search window to guarded
+refinement of the incumbent: `_refine_tail` = ILS over {K._climb_lahc(L=1) →
+K._z3_refine (guided swap) → K._ejection_refine (chains)} with monotonic accept,
+starting FROM best. Two-layer guard: refiner accepts only K.total_obj improvements AND
+the result is re-scored on the oracle before replacing best. The movers reach exactly
+the states the assignment MIP cannot express (in-bay/chain rearrangements = the T1
+trap; Z1=0-preserving Z3 exchanges = the T11/T17 refinement-bound losses). Dynamic
+build reserve re-read each round via o1_holder (a Z1 repair inside the tail reclaims
+the tardy reserve on the spot — T1 does exactly this). `ACCORD_REFINE=0` = exact v1
+(verified: T17@60 63,162 reproduced); skipped under `ACCORD_ITERS` (tail is
+wall-driven).
+
+Results (single wall runs `.claude/scratch/_v2_family_60.log`, all oracle-feasible
+stage 5, wall ≤54.5s @60 / 162.5s @180 — no overrun):
+
+| inst | v1 | v2 | Δ | refine gain/secs | vs PRISM 4-core |
+|---|---|---|---|---|---|
+| T1@60 | 31,156 (Z1=1) | **6,533 (Z1=0)** | **−79.0%** | 24,623 / 52.9s | 6,533 → **0.0% TIE** (exact value match) |
+| T11@60 | 40,691 | **30,464** | **−25.1%** | 10,227 / 14.8s | 32,067 → **−5.0% WIN** |
+| T13@60 | 112,234 | **111,130** | −1.0% | 1,104 / 6.4s | 114,810 → **−3.2% WIN** |
+| T17@60 | 63,162 | **57,621** | **−8.8%** | 5,541 / 40.6s | 57,581 → +0.07% ~tie |
+| T18@60 | 72,408 | **55,611** | **−23.2%** | 16,797 / 19.1s | 75,140 → **−26.0% WIN** |
+| T20@60 | 297,690 | 297,690 | 0% | not fired (saturated=False) | 238,855 → +24.6% LOSS |
+| T13@180 | 112,234 | **86,593** | **−22.8%** | 25,641 / 112.6s | 85,404 → +1.4% |
+
+Reads:
+- **T1 trap SOLVED** — the LAHC/chain movers repair the Z1=1 in-bay arrangement the
+  per-block price signal could only point at; lands on PRISM's exact champion value.
+  The planned "blocker-shaped price signal" lever is now largely moot.
+- **Long-budget saturation broken**: T13@180 −22.8% (was bit-identical to @60); the
+  tail scales with budget (112.6s refine → 25,641).
+- **T20 untouched as designed**: patience never fires while the loop still finds bests
+  (its 84 iters < 120); v1 output reproduced exactly = the guard's no-regression
+  property demonstrated live. T20 remains the one loss (pack-cost-dominated; the loop
+  is budget-bound there, not diversity-bound — 4-core is the lever for it).
+- Refine-tail beats the kick everywhere the kick helped (T17 57,621 < kick's 59,096)
+  without the kick's T13 damage → `ACCORD_JITS` stays 0; the portfolio-diversity role
+  the kick was reserved for is partly absorbed by the tail.
+
+Caveat: single wall runs (n=1) vs v1 numbers measured earlier the same day; but the
+loop is seeded/single-threaded (T20 & the ACCORD_REFINE=0 control reproduce v1
+EXACTLY), so the deltas are real, not machine-load noise.
+
+Next levers, re-ranked after v2: ① 4-core price-loop portfolio (T20-class needs
+throughput; diverse ρ/decay/patience per worker — license: loop MIPs are Gurobi,
+single-use ⇒ needs serialized MIP access or in-process interleave) ② in-loop λ sweeps
+at stalls ③ full-20 sweep + grader zip once T20-class is addressed.

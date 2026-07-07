@@ -28,8 +28,15 @@ lines; Mix-CALADIN arXiv:2604.14897), surrogate Lagrangian relaxation for schedu
 (Bragin et al.), price smoothing/stabilization (Wentges/Pessoa; arXiv:2604.23889).
 
 Reuses ONLY the validated packing/scoring kernel from BRIDGE (imported as `K`), exactly
-like PRISM does: the packer is the oracle, the loop is new. No LAHC/ILS/recombine runs
-inside ACCORD -- the price loop IS the search. Time-managed; always returns feasible.
+like PRISM does: the packer is the oracle, the loop is new. Time-managed; always returns
+feasible.
+
+v2 (refine-tail): the price loop is the GENERATOR; measured trajectories show it
+saturates its reachable basin set at 54-100% of the budget remaining, so once no new
+best appears for ACCORD_PATIENCE iterations the tail is handed to guarded kernel
+refinement (LAHC relocation + guided swap + ejection chains, monotonic accept) -- the
+movers that reach states the assignment MIP cannot express. ACCORD_REFINE=0 restores
+the pure v1 loop.
 """
 from __future__ import annotations
 import os
@@ -187,6 +194,52 @@ def price_mip(prob, price, lam, time_limit, warm=None, prox=0.0, prox_ref=None):
 
 
 # --------------------------------------------------------------------------- #
+# saturation refine-tail (v2): the price loop SATURATES its reachable basin set long
+# before the budget on most instances (measured off _val2 trajectories: 54-100% of
+# iterations come AFTER the last new best -- T1 100%, T17 92%, T13@180 84%). Once no
+# new best has appeared for ACCORD_PATIENCE iterations, the remaining search window is
+# worth more as guarded LOCAL refinement of the incumbent than as more price iterates:
+# the validated kernel movers (LAHC relocation + guided swap + ejection chains) reach
+# exactly the states the assignment MIP cannot express -- in-bay/chain rearrangements
+# (the T1 Z1=1 trap) and Z1=0-preserving Z3 exchanges (the T11/T17 "refinement-bound"
+# losses). Monotonic: starts FROM best, accepts improvements only -> the only possible
+# cost is the price iterations not run, and patience only fires when those were
+# producing nothing. Instances where the loop keeps finding bests (T20: max observed
+# gap 15, total 84 iters @60) never trigger it.
+# --------------------------------------------------------------------------- #
+def _refine_tail(prob, best, best_tot, cache, dl_fn, rng, o1_holder=None):
+    """Guarded ILS refinement of the incumbent until the (dynamic) search window closes.
+    dl_fn() re-reads the deadline each round: refinement can only shrink Z1, which can
+    only GROW the window (dynamic build reserve), so re-reading is monotonic-safe.
+    o1_holder[0] is kept at the incumbent's Z1 so dl_fn can re-size the build reserve
+    (a T1-style Z1 repair inside the tail reclaims the tardy reserve on the spot)."""
+    L = int(_fenv("SOLVER_LAHC_L", 1))
+
+    def _accept(cur, tot):
+        nonlocal best, best_tot
+        best, best_tot = cur, tot
+        if o1_holder is not None:
+            _, perbay = K.total_obj(prob, best, cache)   # all bays cached -> cheap
+            o1_holder[0] = sum(perbay.values())
+
+    def _round(A):
+        cur, tot = K._climb_lahc(prob, dict(A), cache, dl_fn(), L, rng=rng)
+        cur, tot = K._z3_refine(prob, cur, cache, dl_fn())
+        cur, tot = K._ejection_refine(prob, cur, cache, dl_fn())
+        return cur, tot
+
+    cur, tot = _round(best)
+    if tot < best_tot - 1e-9:
+        _accept(cur, tot)
+    while K._within(dl_fn()):
+        cand = K._perturb(prob, best, cache, rng)
+        cur, tot = _round(cand)
+        if tot < best_tot - 1e-9:
+            _accept(cur, tot)
+    return best, best_tot
+
+
+# --------------------------------------------------------------------------- #
 # the ACCORD loop
 # --------------------------------------------------------------------------- #
 def accord_solve(prob, timelimit, _return_assignment=False):
@@ -221,6 +274,14 @@ def accord_solve(prob, timelimit, _return_assignment=False):
     mip_tl = _fenv("ACCORD_MIP_TL", 4.0)
     iters_cap = os.environ.get("ACCORD_ITERS")  # deterministic A/B budget (optional)
     iters_cap = int(iters_cap) if iters_cap else None
+    # v2 refine-tail (see _refine_tail): patience 120 > the largest gap between successive
+    # bests ever observed on the hard family (85, T17) -- the loop keeps its entire
+    # improvement trajectory and only cedes the saturated tail. ACCORD_REFINE=0 == v1;
+    # skipped under ACCORD_ITERS (the refine tail is wall-driven, not iteration-counted).
+    refine_on = _env_flag("ACCORD_REFINE", True) and iters_cap is None
+    patience = int(_fenv("ACCORD_PATIENCE", 120))
+    last_best_it = 0
+    saturated = False
 
     oracle = _Oracle(prob)
 
@@ -275,8 +336,13 @@ def accord_solve(prob, timelimit, _return_assignment=False):
             search_end = _search_end(best_o1)
             stall = 0
             jits = 0
+            last_best_it = it
         else:
             stall += 1
+        if refine_on and it - last_best_it >= patience:
+            saturated = True
+            it += 1
+            break
         # adaptive step (surrogate-subgradient flavor): cool down when the iterate
         # worsened -- the mass-migration overshoot seen in the probe -- warm up gently
         # when it improved.
@@ -330,10 +396,33 @@ def accord_solve(prob, timelimit, _return_assignment=False):
         it += 1
         iter_cost = max(iter_cost * 0.7 + (time.time() - t_it) * 0.3, 0.2)
 
+    # v2 refine-tail: hand whatever is left of the search window (the saturated tail
+    # after a patience break, or just the iter_cost leftover after a normal timeout)
+    # to guarded local refinement of the incumbent. Guard is two-layer: the refiner
+    # accepts only K.total_obj improvements, and the result is re-scored on the oracle
+    # before replacing best -- adoption is monotonic on the exact model the loop ranks by.
+    refine_gain, refine_secs = 0.0, 0.0
+    if refine_on and time.time() < _search_end(best_o1) - 0.5:
+        t_r = time.time()
+        rcache = {}
+        guard_tot, _ = K.total_obj(prob, best, rcache)
+        hold = [best_o1]
+        rbest, rtot = _refine_tail(prob, best, guard_tot, rcache,
+                                   lambda: _search_end(hold[0]), rng, o1_holder=hold)
+        if rtot < guard_tot - 1e-9:
+            tot2, o12, _, _ = oracle.eval(rbest)
+            if tot2 < best_tot - 1e-9:
+                refine_gain = best_tot - tot2
+                best, best_tot, best_o1 = dict(rbest), tot2, o12
+        refine_secs = time.time() - t_r
+
     LAST_STATS.clear()
     LAST_STATS.update({"iters": it, "traj": traj, "best_tot": best_tot,
                        "best_o1": best_o1, "price_nnz": len(price),
-                       "first_iter": None if not traj else traj[0]})
+                       "first_iter": None if not traj else traj[0],
+                       "saturated": saturated, "last_best_it": last_best_it,
+                       "refine_gain": round(refine_gain, 1),
+                       "refine_secs": round(refine_secs, 1)})
     if _return_assignment:
         return best, best_tot
 
