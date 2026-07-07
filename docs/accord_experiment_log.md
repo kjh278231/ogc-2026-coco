@@ -182,3 +182,30 @@ Next levers, re-ranked after v2: ① 4-core price-loop portfolio (T20-class need
 throughput; diverse ρ/decay/patience per worker — license: loop MIPs are Gurobi,
 single-use ⇒ needs serialized MIP access or in-process interleave) ② in-loop λ sweeps
 at stalls ③ full-20 sweep + grader zip once T20-class is addressed.
+
+## 07-08 — v3 = measured build reserve for tardy incumbents: T20 −32.1% (Z1 4→0),
+the LAST champion loss flips → hard family 4W/2T/0L single-core
+
+Found while wall-checking the heavy instances: T20@60 total wall was 38.4s and
+T38@60 46.5s — for incumbents that STAY tardy the static 30% poly reserve never
+shrinks, yet the REAL build off warm caches costs <1s (T20 measured 0.2s, T14 0.13s,
+T1 0.02s). ~22s of a 60s budget sat idle on exactly the pack-heavy instances that are
+budget-bound. Fix: at the would-be time-break (and before refine entry) with Z1>0,
+run ONE real `_score_and_pack` and re-size the reserve to min(static, 2.5×measured)
+— the bridge idle-ILS multiplier, self-adjusting. Gate: measure only when
+6×iter_cost < static reserve (poly escalation ≲ ~15× a mask eval ⇒ T38-class skips,
+keeps the full reserve, pays nothing).
+
+| inst @60 | before | after | Δ | note |
+|---|---|---|---|---|
+| T20 | 297,690 (Z1=4, 84 it) | **202,262 (Z1=0, 115 it)** | **−32.1%** | beats PRISM 4-core 238,855 by **−15.3%** — last loss flipped; near v1@180's 187k at 1/3 budget |
+| T14 | 104,044 (113 it) | **97,491 (186 it)** | **−6.3%** | |
+| T38 | 87,487,961 | = (build_cost None) | 0% | gate skipped; wall 46.0s no overrun |
+| T13 | 111,130 | 112,234 | +1.0% | NOT the lever (Z1=0 path untouched): machine load ate the marginal 6.4s refine window this run → v1 value; boundary noise |
+| T1 | 6,533 | **6,533** | 0% | refine-entry measurement path verified (build 0.02s, refine 52.4s) |
+
+Walls 46.0–55.1s @60, all feasible stage 5, no overrun. **Hard family @60,
+single-core ACCORD vs the 4-core PRISM+MO+SWAP champion: T11 −5.0%, T13 −2.2%,
+T18 −26.0%, T20 −15.3% wins; T1, T17 ties; zero losses.** T20's refine still never
+fires (saturated=False — still budget-bound, improving at cutoff) → the 4-core
+portfolio remains the next multiplier for it.

@@ -299,6 +299,9 @@ def accord_solve(prob, timelimit, _return_assignment=False):
     poly_frac = _fenv("SOLVER_POLY_RESERVE", 0.30)
     poly_deadline = t0 + timelimit - safety
 
+    r_static = max(poly_floor, timelimit * poly_frac)
+    build_cost = None        # measured real build cost of a tardy incumbent (see below)
+
     def _search_end(cur_o1):
         """DYNAMIC build reserve: the 30% polygon reserve is only needed while the
         incumbent packs tardy (poly escalation fires on tardy bays only); the a_pref
@@ -306,12 +309,34 @@ def accord_solve(prob, timelimit, _return_assignment=False):
         budget idle (T=60 runs used 39s) while the eventual best had Z1=0 and built
         cheap. Re-size off the CURRENT best each iteration -- the loop keeps a monotonic
         best, so reclaiming the reserve into more iterations can never regress, and the
-        moment the best goes tardy again the full reserve is restored."""
+        moment the best goes tardy again the full reserve is restored.
+        For incumbents that STAY tardy (T20-class) even 30% is oversized -- the real
+        build off warm caches costs <1s while 18s sit reserved (T20@60 used 38.4s of
+        60). Once one real build has been MEASURED, reserve 2.5x that instead (the
+        bridge idle-ILS multiplier: >= the guard's build cost, self-adjusting)."""
         if _return_assignment:
             return poly_deadline
-        r = (max(poly_floor, timelimit * poly_frac) if cur_o1 > 1e-9
-             else max(1.0, timelimit * 0.04))
+        if cur_o1 > 1e-9:
+            r = r_static if build_cost is None else min(r_static, max(1.5, 2.5 * build_cost))
+        else:
+            r = max(1.0, timelimit * 0.04)
         return poly_deadline - r
+
+    def _measure_build():
+        """One real (poly-escalation) build of the tardy incumbent to size the reserve.
+        Gated so the measurement can't hurt: only when the mask-eval iteration cost says
+        a build is plausibly cheap (6x iter_cost < the static reserve -- poly escalation
+        costs ~15x a mask eval at worst, so T38-class skips and keeps the full reserve),
+        and the rebuild at the end runs off the caches this build just warmed."""
+        nonlocal build_cost
+        if (build_cost is None and best_o1 > 1e-9 and not _return_assignment
+                and iters_cap is None and 6 * iter_cost < r_static
+                and time.time() + iter_cost < poly_deadline - 2 * iter_cost):
+            t_b = time.time()
+            K._score_and_pack(prob, best, poly_deadline=poly_deadline)
+            build_cost = time.time() - t_b
+            return True
+        return False
 
     search_end = _search_end(best_o1)
 
@@ -329,7 +354,12 @@ def accord_solve(prob, timelimit, _return_assignment=False):
             if it >= iters_cap:
                 break
         elif time.time() + iter_cost > search_end:
-            break
+            # would stop on the static tardy reserve -> measure the real build once;
+            # if the reserve shrinks, the loop keeps running into the reclaimed window.
+            if _measure_build():
+                search_end = _search_end(best_o1)
+            if time.time() + iter_cost > search_end:
+                break
         t_it = time.time()
         A = price_mip(prob, price, lam, min(mip_tl, max(0.5, search_end - time.time())),
                       warm=warm, prox=prox * w["w3"], prox_ref=warm)
@@ -408,6 +438,8 @@ def accord_solve(prob, timelimit, _return_assignment=False):
     # accepts only K.total_obj improvements, and the result is re-scored on the oracle
     # before replacing best -- adoption is monotonic on the exact model the loop ranks by.
     refine_gain, refine_secs = 0.0, 0.0
+    if refine_on:
+        _measure_build()     # saturated-tardy path (T1-class): reclaim the reserve too
     # entry headroom scaled to the measured per-iteration cost (MIP+pack): on heavy
     # instances one pack eval costs seconds, and a tail that can only afford a fraction
     # of one LAHC move would overshoot the build reserve for nothing.
@@ -431,7 +463,8 @@ def accord_solve(prob, timelimit, _return_assignment=False):
                        "first_iter": None if not traj else traj[0],
                        "saturated": saturated, "last_best_it": last_best_it,
                        "refine_gain": round(refine_gain, 1),
-                       "refine_secs": round(refine_secs, 1)})
+                       "refine_secs": round(refine_secs, 1),
+                       "build_cost": None if build_cost is None else round(build_cost, 2)})
     if _return_assignment:
         return best, best_tot
 
