@@ -122,3 +122,7 @@ are EMPTY at a stall (Z1=0 idle spin — v1 did nothing there, any exploration >
 
 Caveat: all single wall runs (n=1); magnitudes carry noise, the instance-split DIRECTION
 is consistent across variants.
+
+**Final default verification (07-07, `_val5_*`):** defaults (JITS=0) reproduce the v1
+optima exactly — T13@180 = 112,234, T17@60 = 63,162; `ACCORD_JITS=3` reproduces the T17
+kick win (59,096). Shipped on branch `accord-solver`.
