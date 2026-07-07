@@ -17,6 +17,10 @@ def algorithm(prob_info, timelimit=60):
     os.environ.setdefault("SOLVER_NUMBA", "1")
     os.environ.setdefault("SOLVER_MASK_PREPARE", "1")
     os.environ.setdefault("SOLVER_MULTIORDER", "1")
+    # bay-parallel pack pool (spawn-probe guarded, serial fallback): frees 26-57% of
+    # eval wall into loop iterations / the refine tail. T13 -3.1% / T14 -3.2% /
+    # T20@180 -1.0%, no losses, no overruns (docs/accord_experiment_log.md 07-08).
+    os.environ.setdefault("ACCORD_PAR", "1")
     import accord_engine as E
     try:
         return E.accord_solve(prob_info, timelimit)

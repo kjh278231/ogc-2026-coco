@@ -79,12 +79,15 @@ def _fenv(name, default):
 # (exited - due), which is the price-update signal.
 # --------------------------------------------------------------------------- #
 class _Oracle:
-    def __init__(self, prob):
+    def __init__(self, prob, pool=None, pool_timeout=60.0):
         self.prob = prob
         self.blocks = prob["blocks"]
         self.m = len(prob["bays"])
         self.w = prob["weights"]
         self.cache = {}          # (j, ids) -> (T, {i: tau_i})
+        self.pool = pool         # bay-parallel pack pool (pack_pool.start; None = serial)
+        self.pool_timeout = pool_timeout
+        self.par_jobs = 0        # bays packed via the pool (diagnostics)
 
     def pack_bay(self, j, ids):
         key = (j, ids)
@@ -117,11 +120,31 @@ class _Oracle:
 
     def eval(self, asg):
         """(true-model total obj, obj1, {i: tau_i}, {i: blockers}) of a full assignment."""
-        obj1, tau, blockers = 0.0, {}, {}
+        keys = {}
         for j in range(self.m):
             ids = tuple(sorted(i for i in asg if asg[i] == j))
-            if not ids:
-                continue
+            if ids:
+                keys[j] = ids
+        # bay-parallel path: farm the cache-miss bays to the pack pool (results are
+        # deterministic per (bay, ids), so this changes NOTHING but wall time); any
+        # failure degrades to the serial pack_bay fill below, permanently.
+        if self.pool is not None:
+            misses = [(j, ids) for j, ids in keys.items() if (j, ids) not in self.cache]
+            if len(misses) >= 2:
+                try:
+                    import pack_pool as _pp
+                    res = self.pool.map_async(_pp._pack, misses)
+                    for j, ids, T, tj, bj in res.get(timeout=self.pool_timeout):
+                        self.cache[(j, ids)] = (T, tj, bj)
+                    self.par_jobs += len(misses)
+                except Exception:
+                    try:
+                        self.pool.terminate()
+                    except Exception:
+                        pass
+                    self.pool = None
+        obj1, tau, blockers = 0.0, {}, {}
+        for j, ids in keys.items():
             T, tj, bj = self.pack_bay(j, ids)
             obj1 += T
             tau.update(tj)
@@ -249,6 +272,32 @@ def _refine_tail(prob, best, best_tot, cache, dl_fn, rng, o1_holder=None):
 # the ACCORD loop
 # --------------------------------------------------------------------------- #
 def accord_solve(prob, timelimit, _return_assignment=False):
+    """Public entry: wraps the solve with the optional bay-parallel pack pool
+    (env ACCORD_PAR, default OFF; spawn-probe guarded -- any failure means the pool is
+    None and the solve runs exactly as the validated serial path)."""
+    pool = None
+    t_start = time.time()
+    if _env_flag("ACCORD_PAR"):
+        try:
+            import pack_pool as _pp
+            pool = _pp.start(prob, timelimit)
+        except Exception:
+            pool = None
+    try:
+        # spawn time is paid BEFORE the solve's t0 -- charge it to the budget, or the
+        # total wall would exceed the caller's timelimit by the spawn cost.
+        return _accord_solve(prob, max(1.0, timelimit - (time.time() - t_start)),
+                             _return_assignment, _pool=pool)
+    finally:
+        if pool is not None:
+            try:
+                pool.terminate()
+                pool.join()
+            except Exception:
+                pass
+
+
+def _accord_solve(prob, timelimit, _return_assignment=False, _pool=None):
     """Time-managed ACCORD solve. Runs the price-consensus loop until the search window
     closes, keeps the best true-model iterate (guarded by an a_pref floor so the output
     is never worse than the trivial preference build), then materializes it with the
@@ -289,7 +338,7 @@ def accord_solve(prob, timelimit, _return_assignment=False):
     last_best_it = 0
     saturated = False
 
-    oracle = _Oracle(prob)
+    oracle = _Oracle(prob, pool=_pool, pool_timeout=max(15.0, 0.5 * timelimit))
 
     # budget layout (mirrors prism_solve): safety tail + polygon build reserve.
     safety = max(2.0, timelimit * 0.06)
@@ -319,7 +368,14 @@ def accord_solve(prob, timelimit, _return_assignment=False):
         if cur_o1 > 1e-9:
             r = r_static if build_cost is None else min(r_static, max(1.5, 2.5 * build_cost))
         else:
+            # pack-pool caveat: with the pool active the workers packed the bays, so the
+            # master's packing caches are COLD and even a Z1=0 build costs several x the
+            # warm-cache one (T14: 0.14s warm -> 0.71s cold; T20 pool-mode @60 with the
+            # bare 4% reserve degraded the final build to AABB = true Z1 10 while the
+            # oracle best was Z1=0). Once measured, reserve 2.5x the real cold build.
             r = max(1.0, timelimit * 0.04)
+            if build_cost is not None:
+                r = max(r, min(r_static, 2.5 * build_cost + 0.5))
         return poly_deadline - r
 
     def _measure_build():
@@ -329,7 +385,8 @@ def accord_solve(prob, timelimit, _return_assignment=False):
         costs ~15x a mask eval at worst, so T38-class skips and keeps the full reserve),
         and the rebuild at the end runs off the caches this build just warmed."""
         nonlocal build_cost
-        if (build_cost is None and best_o1 > 1e-9 and not _return_assignment
+        if (build_cost is None and (best_o1 > 1e-9 or oracle.pool is not None)
+                and not _return_assignment
                 and iters_cap is None and 6 * iter_cost < r_static
                 and time.time() + iter_cost < poly_deadline - 2 * iter_cost):
             t_b = time.time()
@@ -348,6 +405,7 @@ def accord_solve(prob, timelimit, _return_assignment=False):
     jits = 0                                    # consecutive jitters without a new best
     it = 0
     traj = []
+    t_mip_sum, t_eval_sum = 0.0, 0.0            # per-phase wall (diagnostics)
     iter_cost = mip_tl * 0.3 + 0.5              # refined by measurement below
     while _HAS_GUROBI:
         if iters_cap is not None:
@@ -365,7 +423,10 @@ def accord_solve(prob, timelimit, _return_assignment=False):
                       warm=warm, prox=prox * w["w3"], prox_ref=warm)
         if A is None:
             break
+        t_m = time.time()
+        t_mip_sum += t_m - t_it
         tot, o1, tau, blockers = oracle.eval(A)
+        t_eval_sum += time.time() - t_m
         traj.append((round(tot, 1), round(o1, 1)))
         if tot < best_tot - 1e-9:
             best, best_tot, best_o1 = dict(A), tot, o1
@@ -464,7 +525,9 @@ def accord_solve(prob, timelimit, _return_assignment=False):
                        "saturated": saturated, "last_best_it": last_best_it,
                        "refine_gain": round(refine_gain, 1),
                        "refine_secs": round(refine_secs, 1),
-                       "build_cost": None if build_cost is None else round(build_cost, 2)})
+                       "build_cost": None if build_cost is None else round(build_cost, 2),
+                       "par": oracle.pool is not None, "par_jobs": oracle.par_jobs,
+                       "t_mip": round(t_mip_sum, 1), "t_eval": round(t_eval_sum, 1)})
     if _return_assignment:
         return best, best_tot
 

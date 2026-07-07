@@ -209,3 +209,53 @@ single-core ACCORD vs the 4-core PRISM+MO+SWAP champion: T11 −5.0%, T13 −2.2
 T18 −26.0%, T20 −15.3% wins; T1, T17 ties; zero losses.** T20's refine still never
 fires (saturated=False — still budget-bound, improving at cutoff) → the 4-core
 portfolio remains the next multiplier for it.
+
+## 07-08 — full-20 @60 sweep: 20/20 feasible, walls 54.3–55.3s, refine fires 18/20
+
+`.claude/scratch/_v3_sweep.log`. 19/20 reach Z1=0 (T14 Z1=1); refine-tail gains are
+broad (T12 −35k, T1 −24.6k, T16 −23.8k, T10 −20.8k, T18 −16.8k, T7 −16.0k, ...).
+Reproducibility: T1/T11/T13/T17/T18/T20 all land on previously measured values; T13
+gets its refine window back (111,130) confirming the +1% run above was load noise.
+**T20@180 = 117,129 (−37.4% vs v1@180 187,172; PRISM@180 113,657 → +3.1%)** — the
+@60 gap of +65% is nearly closed at 180s; refine reclaimed 85k over 66.5s.
+
+## 07-08 — v4 = bay-parallel pack pool (ACCORD_PAR, default ON): eval wall −26..−57%
+freed into iterations/refine — T13 −3.1%, T14 −3.2%, T20@180 −1.0%, zero losses
+
+Why this and not a trajectory-diverse 4-core portfolio: T20-class needs THROUGHPUT
+on one accumulating price map (diversity splits it), pack results are deterministic
+per (bay, ids) so parallel packing leaves the trajectory EXACTLY the single-core one
+(verified: fixed-30-iter best bit-identical PAR on/off; production T20@180 same
+211 iters / last_best 90), and packing never touches Gurobi → no single-use-license
+contention (the MIP stays serial in the master). `accord/pack_pool.py`: spawn-probe
++ serial fallback ([[portfolio-spawn-guard]]), 4 workers, oracle farms cache-miss
+bays via map_async (timeout-guarded; any failure degrades to serial permanently).
+
+Phase decomposition (T20, fixed 30 it): MIP 3.6s (12%) / eval 9.3s (63%) → pool cuts
+eval to 6.9s @30it (bay-level Amdahl: the biggest bay is the critical path) and to
+−57% at @180 (worker caches warm). The reclaimed wall flows to whichever phase is
+binding: more loop iterations when budget-bound (T20@60 124→201 it) or a longer
+refine tail when saturated (T20@180 refine 72→106s; T13@60 refine 6.7→19.9s).
+
+**Cold-cache build incident (fixed):** with workers packing every bay, the MASTER's
+packing caches stay cold, so even a Z1=0 final build costs ~5-12× the warm one
+(T14 0.14→0.71s, T20 →2.47s) — the bare 4% Z1=0 reserve degraded T20@60's final
+build to AABB: true obj 468,932 (Z1=10) while the internal best was 202,262 (Z1=0).
+Fix: extend the v3 measured-build mechanism to fire whenever the pool is active
+(not just Z1>0); the measurement itself warms the master's caches, so the final
+build then runs at warm cost. Re-run: T20@60 true obj = best exactly (202,262).
+
+| inst | serial | ACCORD_PAR=1 | Δ |
+|---|---|---|---|
+| T13@60 | 111,130 | **107,689** | **−3.1%** |
+| T14@60 | 97,491 | **94,386** | **−3.2%** |
+| T20@180 | 116,504 | **115,388** | −1.0% |
+| T20@60 | 202,262 | 202,262 | 0 (loop saturates at it 90 regardless) |
+| T1@60 | 6,533 | 6,533 | 0 (spawn ~2s off the refine tail, harmless) |
+| T38@60 | 87,487,961 | = | 0 (iters 2→3; wall 49.2s, timeout-robust) |
+| T17@60 | 57,621 | 57,621 | 0 (entry-default smoke) |
+
+No losses, no overruns (max wall 56.7s @60). **Default ON** in accord/myalgorithm.py
+(`ACCORD_PAR=0` = serial). Upgrade path if more is wanted: (bay × order) job grain
+under MULTIORDER breaks the biggest-bay critical path (~3× eval ceiling vs the
+current ~2×); the refine tail's total_obj is still serial (master-side).
