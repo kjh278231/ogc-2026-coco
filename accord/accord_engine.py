@@ -223,9 +223,15 @@ def _refine_tail(prob, best, best_tot, cache, dl_fn, rng, o1_holder=None):
             o1_holder[0] = sum(perbay.values())
 
     def _round(A):
+        # Each stage evaluates its input at least once even with an expired deadline,
+        # and a pack eval on the heaviest instances costs seconds -- gate the later
+        # stages so a round overshoots the window by at most ~1-2 evals (the same
+        # bound the v1 loop has), not 3 stages' worth.
         cur, tot = K._climb_lahc(prob, dict(A), cache, dl_fn(), L, rng=rng)
-        cur, tot = K._z3_refine(prob, cur, cache, dl_fn())
-        cur, tot = K._ejection_refine(prob, cur, cache, dl_fn())
+        if K._within(dl_fn()):
+            cur, tot = K._z3_refine(prob, cur, cache, dl_fn())
+        if K._within(dl_fn()):
+            cur, tot = K._ejection_refine(prob, cur, cache, dl_fn())
         return cur, tot
 
     cur, tot = _round(best)
@@ -402,7 +408,10 @@ def accord_solve(prob, timelimit, _return_assignment=False):
     # accepts only K.total_obj improvements, and the result is re-scored on the oracle
     # before replacing best -- adoption is monotonic on the exact model the loop ranks by.
     refine_gain, refine_secs = 0.0, 0.0
-    if refine_on and time.time() < _search_end(best_o1) - 0.5:
+    # entry headroom scaled to the measured per-iteration cost (MIP+pack): on heavy
+    # instances one pack eval costs seconds, and a tail that can only afford a fraction
+    # of one LAHC move would overshoot the build reserve for nothing.
+    if refine_on and time.time() + max(0.5, 0.6 * iter_cost) < _search_end(best_o1):
         t_r = time.time()
         rcache = {}
         guard_tot, _ = K.total_obj(prob, best, rcache)
