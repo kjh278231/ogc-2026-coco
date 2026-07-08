@@ -1,0 +1,17 @@
+=== A: ejection ===
+[HELM-PORTF] regime=congested anchors=4 workers=4 worker_tl=134.1 build_cost=4.0
+[HELM-PORTF] w0(apref) elapsed=134.2 pool=2998 tot=161703.0 err=None
+[HELM-PORTF] w1(greedy0.9) elapsed=134.2 pool=3026 tot=155067.0 err=None
+[HELM-PORTF] w2(mip16) elapsed=134.2 pool=3199 tot=140095.0 err=None
+[HELM-PORTF] w3(mipcong) elapsed=134.3 pool=2328 tot=249141.0 err=None
+LAST {"mode": "portfolio", "regime": "congested", "feats": {"max_util": 2.818, "rho": 0.598}, "n_workers": 4, "worker_tot": [161703.0, 155067.0, 140095.0, 249141.0], "anchor_names": ["apref", "greedy0.9", "mip16", "mipcong"], "union_recomb": true, "final_obj": 140095, "n_cands": 6}
+{"algo": "helm", "inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 140095, "obj123": [1, 613, 878], "wall_s": 171.0}
+=== B: greedy->capped ===
+[HELM-PORTF] regime=congested anchors=4 workers=4 worker_tl=136.9 build_cost=3.8
+[HELM-PORTF] w0(apref) elapsed=137.0 pool=3111 tot=155067.0 err=None
+[HELM-PORTF] w1(capped) elapsed=137.0 pool=3304 tot=140020.0 err=None
+[HELM-PORTF] w2(mip16) elapsed=137.0 pool=2329 tot=164797.0 err=None
+[HELM-PORTF] w3(mipcong) elapsed=137.2 pool=2441 tot=249141.0 err=None
+LAST {"mode": "portfolio", "regime": "congested", "feats": {"max_util": 2.818, "rho": 0.598}, "n_workers": 4, "worker_tot": [155067.0, 140020.0, 164797.0, 249141.0], "anchor_names": ["apref", "capped", "mip16", "mipcong"], "union_recomb": true, "final_obj": 140020, "n_cands": 6}
+{"algo": "helm", "inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 140020, "obj123": [1, 538, 881], "wall_s": 172.3}
+=== FIX-AB DONE ===

@@ -1,0 +1,26 @@
+=== gate: band losses at deployed wall (T=180) ===
+prism T18 T=180: feasible=True obj=60935 obj123=[0, 2898, 371] wall=174.2s
+ helm T18 T=180: feasible=True obj=50074 obj123=[0, 3275, 278] wall=172.5s
+==> T18 T=180: prism 60935 vs helm 50074  (-17.8% HELM)
+prism T6 T=180: feasible=True obj=53550 obj123=[0, 1500, 287] wall=174.5s
+ helm T6 T=180: feasible=True obj=53550 obj123=[0, 1500, 287] wall=174.4s
+==> T6 T=180: prism 53550 vs helm 53550  (+0.0% tie)
+=== sanity: known FLUX wall win + tie ===
+prism T13 T=180: feasible=True obj=85404 obj123=[0, 3036, 528] wall=174.3s
+ helm T13 T=180: feasible=True obj=85132 obj123=[0, 827, 609] wall=173.0s
+==> T13 T=180: prism 85404 vs helm 85132  (-0.3% HELM)
+prism T20 T=180: feasible=True obj=113657 obj123=[0, 922, 865] wall=173.0s
+ helm T20 T=180: feasible=True obj=140020 obj123=[1, 538, 881] wall=171.1s
+==> T20 T=180: prism 113657 vs helm 140020  (+23.2% PRISM)
+=== P4/P5 zone (T=300) ===
+prism T14 T=300: feasible=True obj=89876 obj123=[0, 765, 647] wall=293.9s
+ helm T14 T=300: feasible=True obj=79431 obj123=[0, 1203, 552] wall=292.2s
+==> T14 T=300: prism 89876 vs helm 79431  (-11.6% HELM)
+=== irreducible T38 (T=300): champion vs HELM vs HELM+MO-off ===
+LAST {"mode": "portfolio", "n_workers": 4, "worker_tot": [70219089.0, 85352510.0, 67166362.0, 71477517.0], "worker_pool_sizes": [64, 45, 76, 61], "worker_err": [null, null, null, null], "anchor_names": ["pref", "balanced", "capped", "mip16"], "idle_reclaim_obj": 67166362, "final_obj": 67166362, "n_cands": 5}
+{"algo": "prism", "inst": "T38", "T": 300.0, "feasible": true, "stage": 5, "obj": 67166362, "obj123": [4966, 3042, 3162], "wall_s": 287.5}
+LAST {"mode": "portfolio", "regime": "irreducible", "feats": {"max_util": 4.681, "rho": 1.777}, "n_workers": 4, "worker_tot": [71477517.0, 70219089.0, 67455677.0, 85352510.0], "anchor_names": ["pref", "balanced", "capped", "mip16"], "final_obj": 67455677, "n_cands": 5}
+{"algo": "helm", "inst": "T38", "T": 300.0, "feasible": true, "stage": 5, "obj": 67455677, "obj123": [4989, 3370, 3102], "wall_s": 284.7}
+LAST {"mode": "portfolio", "regime": "irreducible", "feats": {"max_util": 4.681, "rho": 1.777}, "n_workers": 4, "worker_tot": [67744230.0, 65270804.0, 63884676.0, 71225545.0], "anchor_names": ["pref", "balanced", "capped", "mip16"], "union_recomb": true, "final_obj": 63884676, "n_cands": 6}
+{"algo": "helm", "inst": "T38", "T": 300.0, "feasible": true, "stage": 5, "obj": 63884676, "obj123": [4714, 1657, 3432], "wall_s": 290.7}
+=== DONE ===

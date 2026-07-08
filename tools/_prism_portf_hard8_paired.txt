@@ -1,0 +1,16 @@
+{"algo": "prism", "inst": "T1", "T": 180.0, "feasible": true, "stage": 5, "obj": 32188, "obj123": [0, 84, 158], "wall_s": 167.6}
+{"algo": "bridge", "inst": "T1", "T": 180.0, "feasible": true, "stage": 5, "obj": 41024, "obj123": [0, 32, 204], "wall_s": 158.9}
+{"algo": "prism", "inst": "T5", "T": 180.0, "feasible": true, "stage": 5, "obj": 68581, "obj123": [0, 1633, 381], "wall_s": 160.8}
+{"algo": "bridge", "inst": "T5", "T": 180.0, "feasible": true, "stage": 5, "obj": 66631, "obj123": [0, 2233, 340], "wall_s": 159.0}
+{"algo": "prism", "inst": "T7", "T": 180.0, "feasible": true, "stage": 5, "obj": 69209, "obj123": [0, 1637, 385], "wall_s": 160.3}
+{"algo": "bridge", "inst": "T7", "T": 180.0, "feasible": true, "stage": 5, "obj": 74986, "obj123": [0, 2398, 388], "wall_s": 166.8}
+{"algo": "prism", "inst": "T13", "T": 180.0, "feasible": true, "stage": 5, "obj": 168579, "obj123": [0, 1583, 1208], "wall_s": 161.1}
+{"algo": "bridge", "inst": "T13", "T": 180.0, "feasible": true, "stage": 5, "obj": 175818, "obj123": [0, 1621, 1261], "wall_s": 160.9}
+{"algo": "prism", "inst": "T14", "T": 180.0, "feasible": true, "stage": 5, "obj": 172684, "obj123": [1, 737, 1137], "wall_s": 160.9}
+{"algo": "bridge", "inst": "T14", "T": 180.0, "feasible": true, "stage": 5, "obj": 182829, "obj123": [1, 1968, 1167], "wall_s": 159.6}
+{"algo": "prism", "inst": "T15", "T": 180.0, "feasible": true, "stage": 5, "obj": 45266, "obj123": [0, 4478, 172], "wall_s": 160.5}
+{"algo": "bridge", "inst": "T15", "T": 180.0, "feasible": true, "stage": 5, "obj": 50382, "obj123": [0, 3985, 229], "wall_s": 167.0}
+{"algo": "prism", "inst": "T17", "T": 180.0, "feasible": true, "stage": 5, "obj": 69389, "obj123": [0, 5876, 345], "wall_s": 161.1}
+{"algo": "bridge", "inst": "T17", "T": 180.0, "feasible": true, "stage": 5, "obj": 75925, "obj123": [0, 5515, 405], "wall_s": 167.2}
+{"algo": "prism", "inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 223903, "obj123": [0, 1963, 1697], "wall_s": 159.5}
+{"algo": "bridge", "inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 266393, "obj123": [0, 1878, 2041], "wall_s": 164.3}

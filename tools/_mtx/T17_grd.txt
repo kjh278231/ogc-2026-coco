@@ -1,0 +1,1 @@
+RESULT T17 grd 120614 True evals=10000 38.5s

@@ -1,0 +1,1 @@
+{"inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 223903, "wall_s": 173.2, "overrun": false, "extracted_from": "C:\\Users\\ADMIN\\AppData\\Local\\Temp\\prism_zip_extract"}

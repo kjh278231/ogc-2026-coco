@@ -1,0 +1,1 @@
+RESULT prob_20 A 1664387 True mip_seed=0 recomb_att=0 recomb_win=0 165.6s

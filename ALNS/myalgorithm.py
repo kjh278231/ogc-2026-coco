@@ -12,7 +12,19 @@
 
 
 def algorithm(prob_info, timelimit=60):
-    """Entry point: kick-centric ALNS. Returns {"operations": {...}}."""
+    """Entry point: kick-centric ALNS. Returns {"operations": {...}}.
+
+    BEST-OF BUILD (timelimit-gated portfolio):
+      * timelimit >= _PORTFOLIO_MIN_T (180s) -> best-of(config A, lever) portfolio:
+        run the config-A trajectory (regression floor) AND the MIP-seed+recombine
+        lever trajectory in parallel, true-score both, emit the better. Provably
+        >= both -> P3/P5-type keep lever gains, P4/P6/T1-type protected from the
+        lever regression (see memory/alns-seed-recombine-instance-split).
+      * timelimit  < _PORTFOLIO_MIN_T -> single-process config A (levers off): on
+        short budgets the levers don't pay and the portfolio spawn/warm overhead
+        hurts, so just run the floor.
+    Any multiprocessing failure degrades to a single-process config-A solve.
+    """
     import os
     # Import-time packing gates (read when solver/packing are imported) -- set first.
     os.environ.setdefault("SOLVER_MASK_SEARCH", "1")
@@ -20,8 +32,19 @@ def algorithm(prob_info, timelimit=60):
     os.environ.setdefault("SOLVER_NUMBA", "1")
     os.environ.setdefault("SOLVER_MASK_PREPARE", "1")
     import solver
+    _PORTFOLIO_MIN_T = float(os.environ.get("ALNS_PORTFOLIO_MIN_T", "180"))
     try:
         import alns
+        if timelimit >= _PORTFOLIO_MIN_T:
+            import alns_portfolio
+            return alns_portfolio.portfolio_solve(prob_info, timelimit)
+        # short budget: config-A floor, single process (levers explicitly off).
+        os.environ["ALNS_MIP_SEED"] = "0"
+        os.environ["ALNS_RECOMB"] = "off"
+        # tight reserves so wall stays within ~5s of the budget (no overrun): small
+        # end-buffer + a final-build margin just above the measured build cost.
+        os.environ.setdefault("ALNS_SAFETY_FRAC", "0.02")
+        os.environ.setdefault("ALNS_BUILD_MARGIN_FACTOR", "1.5")
         return alns.alns_solve(prob_info, timelimit)
     except Exception:
         # last-resort guaranteed-feasible fallback: pure AABB build of the

@@ -1,0 +1,3 @@
+{"algo": "prism", "inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 223903, "obj123": [0, 1963, 1697], "wall_s": 173.9}
+{"algo": "prism", "inst": "T14", "T": 180.0, "feasible": true, "stage": 5, "obj": 172684, "obj123": [1, 737, 1137], "wall_s": 174.5}
+{"algo": "prism", "inst": "T17", "T": 60.0, "feasible": true, "stage": 5, "obj": 77272, "obj123": [0, 6284, 392], "wall_s": 55.9}

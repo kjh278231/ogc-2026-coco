@@ -1,0 +1,29 @@
+RESULT T1 5W 51677 True 159.0s
+7 build_cost=0.9 final_guard=6.0
+[PORTF] w0 env={'SOLVER_SEED': '20265', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_NORECOMB': '0'} elapsed=146.8 poolsz=29852 err=None trueobj=133389
+[PORTF] w1 env={'SOLVER_SEED': '12346', 'SOLVER_LAHC': '0'} elapsed=155.8 poolsz=33618 err=None trueobj=124755
+[PORTF] w2 env={'SOLVER_SEED': '28184', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '30'} elapsed=155.8 poolsz=33014 err=None trueobj=79089
+[PORTF] w3 env={'SOLVER_SEED': '36103', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_DIVERSE': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=155.8 poolsz=32436 err=None trueobj=56453
+[PORTF] w4 env={'SOLVER_SEED': '36104', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=155.8 poolsz=32880 err=None trueobj=51677
+RESULT T13 5W 175818 True 163.7s
+build_cost=1.2 final_guard=6.0
+[PORTF] w0 env={'SOLVER_SEED': '20265', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_NORECOMB': '0'} elapsed=146.8 poolsz=21013 err=None trueobj=240962
+[PORTF] w1 env={'SOLVER_SEED': '12346', 'SOLVER_LAHC': '0'} elapsed=155.5 poolsz=23111 err=None trueobj=219060
+[PORTF] w2 env={'SOLVER_SEED': '28184', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '30'} elapsed=155.5 poolsz=19751 err=None trueobj=175818
+[PORTF] w3 env={'SOLVER_SEED': '36103', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_DIVERSE': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=155.5 poolsz=20521 err=None trueobj=198871
+[PORTF] w4 env={'SOLVER_SEED': '36104', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=155.5 poolsz=21174 err=None trueobj=317224
+RESULT T20 5W 290155 True 159.0s
+build_cost=1.8 final_guard=6.0
+[PORTF] w0 env={'SOLVER_SEED': '20265', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_NORECOMB': '0'} elapsed=146.6 poolsz=15743 err=None trueobj=290155
+[PORTF] w1 env={'SOLVER_SEED': '12346', 'SOLVER_LAHC': '0'} elapsed=155.0 poolsz=17626 err=None trueobj=850487
+[PORTF] w2 env={'SOLVER_SEED': '28184', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '30'} elapsed=155.0 poolsz=14963 err=None trueobj=361681
+[PORTF] w3 env={'SOLVER_SEED': '36103', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_DIVERSE': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=155.0 poolsz=14837 err=None trueobj=454432
+[PORTF] w4 env={'SOLVER_SEED': '36104', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=155.0 poolsz=13944 err=None trueobj=293354
+RESULT T18 5W 68683 True 164.4s
+ build_cost=1.3 final_guard=6.0
+[PORTF] w0 env={'SOLVER_SEED': '20265', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_NORECOMB': '0'} elapsed=146.6 poolsz=25880 err=None trueobj=97274
+[PORTF] w1 env={'SOLVER_SEED': '12346', 'SOLVER_LAHC': '0'} elapsed=155.4 poolsz=28199 err=None trueobj=384053
+[PORTF] w2 env={'SOLVER_SEED': '28184', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '30'} elapsed=155.4 poolsz=22436 err=None trueobj=100826
+[PORTF] w3 env={'SOLVER_SEED': '36103', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_DIVERSE': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=155.4 poolsz=25651 err=None trueobj=96355
+[PORTF] w4 env={'SOLVER_SEED': '36104', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=155.4 poolsz=28044 err=None trueobj=68683
+5W_DONE

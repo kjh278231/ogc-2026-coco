@@ -1,0 +1,1 @@
+RESULT prob_1 A 445816 True mip_seed=0 recomb_att=0 recomb_win=0 168.3s

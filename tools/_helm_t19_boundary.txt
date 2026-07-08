@@ -1,0 +1,5 @@
+LAST {"mode": "portfolio", "regime": "heavy", "feats": {"max_util": 3.218, "rho": 0.459}, "n_workers": 4, "worker_tot": [60746.0, 60746.0, 67928.0, 69882.0], "anchor_names": ["pref", "balanced", "capped", "mip16"], "union_recomb": true, "final_obj": 60746, "n_cands": 6}
+{"algo": "helm", "inst": "T19", "T": 180.0, "feasible": true, "stage": 5, "obj": 60746, "obj123": [0, 4214, 330], "wall_s": 174.7}
+LAST {"mode": "portfolio", "regime": "congested", "feats": {"max_util": 3.218, "rho": 0.459}, "n_workers": 4, "worker_tot": [71378.0, 61170.0, 60793.0, 60746.0], "anchor_names": ["apref", "greedy0.9", "mip16", "mipcong"], "union_recomb": true, "final_obj": 60746, "n_cands": 6}
+{"algo": "helm", "inst": "T19", "T": 180.0, "feasible": true, "stage": 5, "obj": 60746, "obj123": [0, 4214, 330], "wall_s": 174.3}
+=== T19 BOUNDARY DONE ===

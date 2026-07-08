@@ -1,0 +1,5 @@
+LAST {"mode": "portfolio", "n_workers": 4, "worker_tot": [5725512.0, 9533773.0, 6711537.0, 6225554.0], "worker_pool_sizes": [272, 243, 329, 324], "worker_err": [null, null, null, null], "anchor_names": ["pref", "balanced", "capped", "mip16"], "union_recomb": true, "union_pool": 1168, "idle_reclaim_obj": 5725512, "final_obj": 5725512, "n_cands": 6}
+{"algo": "prism", "inst": "T37", "T": 300.0, "feasible": true, "stage": 5, "obj": 5725512, "obj123": [1444, 2565, 1504], "wall_s": 294.4}
+LAST {"mode": "portfolio", "regime": "irreducible", "feats": {"max_util": 3.561, "rho": 1.165}, "n_workers": 4, "worker_tot": [8922483.0, 6326740.0, 5727901.0, 6353283.0], "anchor_names": ["pref", "balanced", "capped", "mip16"], "union_recomb": true, "final_obj": 5727901, "n_cands": 6}
+{"algo": "helm", "inst": "T37", "T": 300.0, "feasible": true, "stage": 5, "obj": 5727901, "obj123": [1365, 1939, 1951], "wall_s": 295.5}
+=== T37 MO-OFF GENERALIZATION DONE ===

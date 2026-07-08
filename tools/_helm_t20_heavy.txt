@@ -1,0 +1,8 @@
+[HELM-PORTF] regime=heavy anchors=4 workers=4 worker_tl=151.3 build_cost=2.4
+[HELM-PORTF] w0(pref) elapsed=151.4 pool=2428 tot=245967.0 err=None
+[HELM-PORTF] w1(balanced) elapsed=151.4 pool=3645 tot=113657.0 err=None
+[HELM-PORTF] w2(capped) elapsed=151.5 pool=3520 tot=428267.0 err=None
+[HELM-PORTF] w3(mip16) elapsed=151.5 pool=2876 tot=183059.0 err=None
+LAST {"mode": "portfolio", "regime": "heavy", "feats": {"max_util": 2.818, "rho": 0.598}, "n_workers": 4, "worker_tot": [245967.0, 113657.0, 428267.0, 183059.0], "anchor_names": ["pref", "balanced", "capped", "mip16"], "union_recomb": true, "final_obj": 113657, "n_cands": 6}
+{"algo": "helm", "inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 113657, "obj123": [0, 922, 865], "wall_s": 173.1}
+=== T20-HEAVY DONE ===

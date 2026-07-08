@@ -1,0 +1,1 @@
+RESULT prob_20 B 1804355 True mip_seed=1 recomb_att=1 recomb_win=0 160.4s

@@ -1,0 +1,8 @@
+{"algo": "prism", "inst": "T13", "T": 180.0, "feasible": true, "stage": 5, "obj": 176694, "obj123": [0, 1344, 1278], "wall_s": 160.5}
+{"algo": "prism", "inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 272424, "obj123": [0, 1279, 2118], "wall_s": 164.2}
+{"algo": "prism", "inst": "T15", "T": 180.0, "feasible": true, "stage": 5, "obj": 50068, "obj123": [0, 4268, 216], "wall_s": 167.9}
+{"algo": "prism", "inst": "T14", "T": 180.0, "feasible": true, "stage": 5, "obj": 181829, "obj123": [0, 1706, 1303], "wall_s": 160.6}
+{"algo": "prism", "inst": "T17", "T": 180.0, "feasible": true, "stage": 5, "obj": 70461, "obj123": [0, 6410, 337], "wall_s": 167.9}
+{"algo": "prism", "inst": "T5", "T": 180.0, "feasible": true, "stage": 5, "obj": 68115, "obj123": [0, 1395, 389], "wall_s": 160.0}
+{"algo": "prism", "inst": "T7", "T": 180.0, "feasible": true, "stage": 5, "obj": 75539, "obj123": [0, 2327, 395], "wall_s": 159.8}
+{"algo": "prism", "inst": "T1", "T": 180.0, "feasible": true, "stage": 5, "obj": 109672, "obj123": [1, 83, 400], "wall_s": 159.6}

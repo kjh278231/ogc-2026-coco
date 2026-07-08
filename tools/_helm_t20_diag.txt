@@ -1,0 +1,14 @@
+[HELM-PORTF] regime=congested anchors=4 workers=4 worker_tl=134.4 build_cost=4.0
+[HELM-PORTF] w0(apref) elapsed=134.4 pool=3062 tot=161703.0 err=None
+[HELM-PORTF] w1(greedy0.9) elapsed=134.4 pool=3264 tot=140020.0 err=None
+[HELM-PORTF] w2(mip16) elapsed=134.6 pool=2387 tot=249141.0 err=None
+[HELM-PORTF] w3(mipcong) elapsed=134.6 pool=3074 tot=155067.0 err=None
+LAST {"mode": "portfolio", "regime": "congested", "feats": {"max_util": 2.818, "rho": 0.598}, "n_workers": 4, "worker_tot": [161703.0, 140020.0, 249141.0, 155067.0], "anchor_names": ["apref", "greedy0.9", "mip16", "mipcong"], "union_recomb": true, "final_obj": 140020, "n_cands": 6}
+{"algo": "helm", "inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 140020, "obj123": [1, 538, 881], "wall_s": 171.1}
+[PRISM-PORTF] anchors=4 workers=4 worker_tl=151.7 build_cost=2.4
+[PRISM-PORTF] w0(pref) elapsed=151.7 pool=2448 tot=245967.0 err=None
+[PRISM-PORTF] w1(balanced) elapsed=151.7 pool=3654 tot=113657.0 err=None
+[PRISM-PORTF] w2(capped) elapsed=151.8 pool=3560 tot=424839.0 err=None
+[PRISM-PORTF] w3(mip16) elapsed=151.8 pool=2900 tot=183059.0 err=None
+LAST {"mode": "portfolio", "n_workers": 4, "worker_tot": [245967.0, 113657.0, 424839.0, 183059.0], "worker_pool_sizes": [2448, 3654, 3560, 2900], "worker_err": [null, null, null, null], "anchor_names": ["pref", "balanced", "capped", "mip16"], "union_recomb": true, "union_pool": 12557, "idle_reclaim_obj": 113657, "final_obj": 113657, "n_cands": 6}
+{"algo": "prism", "inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 113657, "obj123": [0, 922, 865], "wall_s": 173.1}

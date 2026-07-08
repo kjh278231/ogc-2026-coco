@@ -218,15 +218,25 @@ def _refine(prob, anchor, cache, dl, L, rng=None):
     # -- reaching mutual-preference exchanges relocation+recombine miss (K._z3_refine). Converges
     # fast (few swaps) so it does not hog the ILS budget; Pareto-safe.
     _swap = K._env_flag("SOLVER_SWAP")
+    # Ejection-chain refinement (SOLVER_EJECTION, default OFF -> bit-identical): the k-opt
+    # generalisation of swap ported from WEAVE, where it was the decisive lever for reaching Z1=0
+    # (PRISM at tight budgets left Z1>0; WEAVE's ejection reached Z1=0 -> serial eval A/B -18..-44%).
+    # Runs after each swap plateau, guarded (Pareto-safe). Gives PRISM WEAVE's Z1=0 reachability
+    # while keeping PRISM's anchor diversity (which beat WEAVE on some instances, e.g. T14/T18).
+    _eject = K._env_flag("SOLVER_EJECTION") and hasattr(K, "_ejection_refine")
     best, best_tot = K._climb_lahc(prob, A0, cache, dl, L, rng=rng)
     if _swap:
         best, best_tot = K._z3_refine(prob, best, cache, dl)
+    if _eject:
+        best, best_tot = K._ejection_refine(prob, best, cache, dl)
     # ILS loop: spend the rest of the budget instead of idling after the first plateau.
     while K._within(dl):
         cand = K._perturb(prob, best, cache, rng)
         cur, tot = K._climb_lahc(prob, cand, cache, dl, L, rng=rng)
         if _swap:
             cur, tot = K._z3_refine(prob, cur, cache, dl)
+        if _eject:
+            cur, tot = K._ejection_refine(prob, cur, cache, dl)
         if tot < best_tot - 1e-9:
             best, best_tot = cur, tot
     return best, best_tot

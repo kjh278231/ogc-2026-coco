@@ -17,6 +17,12 @@ def main():
         sys.path.insert(0, os.path.join(ROOT, "prism"))
     elif algo == "stow":
         sys.path.insert(0, os.path.join(ROOT, "stow"))
+    elif algo == "weave":
+        sys.path.insert(0, os.path.join(ROOT, "weave"))
+    elif algo == "flux":
+        sys.path.insert(0, os.path.join(ROOT, "flux"))
+    elif algo == "helm":
+        sys.path.insert(0, os.path.join(ROOT, "helm"))
     else:
         sys.path.insert(0, os.path.join(ROOT, "bridge"))
     import myalgorithm as M
@@ -24,7 +30,7 @@ def main():
     sol = M.algorithm(prob, T)
     wall = time.time() - t0
     last = {}
-    if algo == "prism":
+    if algo in ("prism", "flux", "helm"):
         try:
             import portfolio
             last = dict(portfolio.LAST)

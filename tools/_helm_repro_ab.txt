@@ -1,0 +1,8 @@
+{"engine": "helm", "inst": "T4", "E": 2500, "feasible": true, "obj": 31157, "z123": [0, 2051, 84], "regime": "low", "best_anchor": "pref", "wall_s": 52.2}
+{"engine": "prism", "inst": "T4", "E": 2500, "feasible": true, "obj": 31157, "z123": [0, 2051, 84], "regime": null, "best_anchor": "pref", "wall_s": 90.3}
+{"engine": "helm", "inst": "T13", "E": 2500, "feasible": true, "obj": 109195, "z123": [0, 825, 790], "regime": "congested", "best_anchor": "mipcong", "wall_s": 139.2}
+{"engine": "flux", "inst": "T13", "E": 2500, "feasible": true, "obj": 109195, "z123": [0, 825, 790], "regime": null, "best_anchor": "mipcong", "wall_s": 137.7}
+{"engine": "helm", "inst": "T11", "E": 2500, "feasible": true, "obj": 41447, "z123": [0, 468, 287], "regime": "congested", "best_anchor": "mipcong", "wall_s": 84.2}
+{"engine": "flux", "inst": "T11", "E": 2500, "feasible": true, "obj": 41447, "z123": [0, 468, 287], "regime": null, "best_anchor": "mipcong", "wall_s": 84.0}
+{"engine": "helm", "inst": "T38", "E": 600, "feasible": true, "obj": 63947420, "z123": [4712, 3462, 3718], "regime": "irreducible", "best_anchor": "capped", "wall_s": 2824.2}
+{"engine": "prism", "inst": "T38", "E": 600, "feasible": true, "obj": 63947420, "z123": [4712, 3462, 3718], "regime": null, "best_anchor": "capped", "wall_s": 2819.0}

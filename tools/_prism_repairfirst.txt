@@ -1,0 +1,6 @@
+{"algo": "prism", "inst": "T4", "obj": 185912, "z1z2z3": [4, 1120, 452], "wall_s": 12.4}
+{"algo": "prism", "inst": "T7", "obj": 211143, "z1z2z3": [5, 1779, 732], "wall_s": 20.6}
+{"algo": "prism", "inst": "T5", "obj": 118200, "z1z2z3": [0, 3000, 648], "wall_s": 9.0}
+{"algo": "prism", "inst": "T3", "obj": 87080, "z1z2z3": [0, 1928, 452], "wall_s": 3.1}
+{"algo": "prism", "inst": "T6", "obj": 353758, "z1z2z3": [7, 914, 933], "wall_s": 33.6}
+{"algo": "prism", "inst": "T10", "obj": 78624, "z1z2z3": [0, 2112, 480], "wall_s": 39.2}

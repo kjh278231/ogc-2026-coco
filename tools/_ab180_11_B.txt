@@ -1,0 +1,1 @@
+RESULT prob_11 B 281307 True mip_seed=1 recomb_att=1 recomb_win=0 161.8s

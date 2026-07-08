@@ -649,12 +649,16 @@ def alns_solve(prob, timelimit, _return_assignment=False):
         poly_deadline = None
         recomb_hardstop = None
     else:
-        safety = max(2.0, timelimit * 0.06)
+        safety = max(1.5, timelimit * float(os.environ.get("ALNS_SAFETY_FRAC", "0.06")))
         poly_deadline = t0 + timelimit - safety
         tb = time.time()
         solver._score_and_pack(prob, best, poly_deadline=poly_deadline)
         build_cost = time.time() - tb
-        build_margin = max(1.0, build_cost * 2.5)
+        # reserve factor x the measured build for the final pack. (_return_assignment
+        # callers also reserve it: the portfolio worker self-packs+scores in this
+        # window after alns_solve returns the assignment.)
+        _bf = float(os.environ.get("ALNS_BUILD_MARGIN_FACTOR", "2.5"))
+        build_margin = max(1.0, build_cost * _bf)
         # hard stop for any recombine solve so the final build margin is preserved;
         # reserve one recombine slot before the search deadline for the final master solve.
         recomb_hardstop = poly_deadline - build_margin

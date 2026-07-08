@@ -1,0 +1,29 @@
+### T1 A (old portfolio) ###
+[PORTF] workers=4 worker_tl=166.2 build_cost=0.4 final_guard=6.0
+[PORTF] w0 env={'SOLVER_SEED': '20265', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_NORECOMB': '0'} elapsed=147.3 poolsz=35832 err=None trueobj=132498
+[PORTF] w1 env={'SOLVER_SEED': '12346', 'SOLVER_LAHC': '0'} elapsed=156.3 poolsz=40468 err=None trueobj=114665
+[PORTF] w2 env={'SOLVER_SEED': '28184', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '30'} elapsed=156.3 poolsz=39774 err=None trueobj=75080
+[PORTF] w3 env={'SOLVER_SEED': '36103', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=156.3 poolsz=41030 err=None trueobj=94508
+RESULT T1 A 75080 True 159.4s
+### T1 B (new portfolio i01->div01) ###
+[PORTF] workers=4 worker_tl=166.3 build_cost=0.3 final_guard=6.0
+[PORTF] w0 env={'SOLVER_SEED': '20265', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_NORECOMB': '0'} elapsed=146.9 poolsz=36396 err=None trueobj=132498
+[PORTF] w1 env={'SOLVER_SEED': '12346', 'SOLVER_LAHC': '0'} elapsed=156.3 poolsz=40228 err=None trueobj=75080
+[PORTF] w2 env={'SOLVER_SEED': '28184', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '30'} elapsed=156.3 poolsz=39616 err=None trueobj=41024
+[PORTF] w3 env={'SOLVER_SEED': '36103', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_DIVERSE': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=156.3 poolsz=40680 err=None trueobj=114665
+RESULT T1 B 41024 True 158.8s
+### T13 A (old portfolio) ###
+[PORTF] workers=4 worker_tl=165.6 build_cost=1.1 final_guard=6.0
+[PORTF] w0 env={'SOLVER_SEED': '20265', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_NORECOMB': '0'} elapsed=147.1 poolsz=27808 err=None trueobj=225404
+[PORTF] w1 env={'SOLVER_SEED': '12346', 'SOLVER_LAHC': '0'} elapsed=155.7 poolsz=29892 err=None trueobj=219060
+[PORTF] w2 env={'SOLVER_SEED': '28184', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '30'} elapsed=155.6 poolsz=29868 err=None trueobj=161321
+[PORTF] w3 env={'SOLVER_SEED': '36103', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=155.6 poolsz=30196 err=None trueobj=368121
+RESULT T13 A 161210 True 166.2s
+### T13 B (new portfolio i01->div01) ###
+[PORTF] workers=4 worker_tl=165.6 build_cost=1.1 final_guard=6.0
+[PORTF] w0 env={'SOLVER_SEED': '20265', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_NORECOMB': '0'} elapsed=146.7 poolsz=27581 err=None trueobj=225404
+[PORTF] w1 env={'SOLVER_SEED': '12346', 'SOLVER_LAHC': '0'} elapsed=155.6 poolsz=29651 err=None trueobj=219060
+[PORTF] w2 env={'SOLVER_SEED': '28184', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '30'} elapsed=155.6 poolsz=25673 err=None trueobj=175818
+[PORTF] w3 env={'SOLVER_SEED': '36103', 'SOLVER_LAHC': '1', 'SOLVER_LAHC_L': '1', 'SOLVER_LAHC_DIVERSE': '1', 'SOLVER_LAHC_INIT_FRAC': '0.1'} elapsed=155.6 poolsz=29890 err=None trueobj=368121
+RESULT T13 B 175818 True 161.3s
+PORTF_AB_DONE

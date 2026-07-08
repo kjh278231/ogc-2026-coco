@@ -1,0 +1,1 @@
+LAST {"mode": "portfolio", "n_workers": 4, "worker_tot": [101356.0, 81702.0, 98264.0, 104656.0], "worker_pool_sizes": [28438, 35791, 21309, 36549], "worker_err": [null, null, null, null], "anchor_names": ["pref", "balanced", "capped", "mip1"], "union_recomb": true, "union_pool": 122085, "final_obj": 81702, "n_cands": 6}

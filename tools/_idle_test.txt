@@ -1,0 +1,6 @@
+=== T20@180 ===
+{"algo": "prism", "inst": "T20", "T": 180.0, "feasible": true, "stage": 5, "obj": 223903, "obj123": [0, 1963, 1697], "wall_s": 172.2}
+LAST {"mode": "portfolio", "n_workers": 4, "worker_tot": [329985.0, 284951.0, 386902.0, 223903.0], "worker_pool_sizes": [22953, 22815, 22842, 22762], "worker_err": [null, null, null, null], "anchor_names": ["pref", "balanced", "capped", "mip1"], "union_recomb": true, "union_pool": 91367, "idle_reclaim_obj": 223903, "final_obj": 223903, "n_cands": 6}
+=== T17@60 ===
+{"algo": "prism", "inst": "T17", "T": 60.0, "feasible": true, "stage": 5, "obj": 77272, "obj123": [0, 6284, 392], "wall_s": 56.5}
+LAST {"mode": "portfolio", "n_workers": 4, "worker_tot": [93383.0, 77272.0, 77630.0, 85056.0], "worker_pool_sizes": [14217, 13585, 14247, 14111], "worker_err": [null, null, null, null], "anchor_names": ["pref", "balanced", "capped", "mip1"], "idle_reclaim_obj": 77272, "final_obj": 77272, "n_cands": 5}

@@ -1,0 +1,7 @@
+built myalgorithm0703-helm.zip (62.6 KB): myalgorithm.py, helm_engine.py, portfolio.py, flux_engine.py, solver.py, packing.py, utils.py
+extracted: ['flux_engine.py', 'helm_engine.py', 'myalgorithm.py', 'packing.py', 'portfolio.py', 'solver.py', 'utils.py']
+  [OK] T1@60: feasible=True obj=6533 wall=56.0s margin=4.0s
+  [OK] T13@180: feasible=True obj=84984 wall=172.9s margin=7.1s
+  [OK] T20@180: feasible=True obj=113657 wall=172.9s margin=7.1s
+  [OK] T38@300: feasible=True obj=64197841 wall=288.7s margin=11.3s
+SMOKE PASS

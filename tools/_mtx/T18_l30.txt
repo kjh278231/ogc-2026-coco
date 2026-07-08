@@ -1,0 +1,1 @@
+RESULT T18 l30 89858 True evals=10000 72.3s

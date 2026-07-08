@@ -1,0 +1,9 @@
+--- T13 T=60 ---
+portfolio {"algo": "prism", "inst": "T13", "T": 60.0, "feasible": true, "stage": 5, "obj": 215782, "obj123": [0, 1421, 1569], "wall_s": 50.1}
+serial    {"algo": "prism", "inst": "T13", "T": 60.0, "feasible": true, "stage": 5, "obj": 253740, "obj123": [2, 81, 1625], "wall_s": 29.5}
+--- T20 T=60 ---
+portfolio {"algo": "prism", "inst": "T20", "T": 60.0, "feasible": true, "stage": 5, "obj": 258506, "obj123": [1, 2494, 1735], "wall_s": 48.1}
+serial    {"algo": "prism", "inst": "T20", "T": 60.0, "feasible": true, "stage": 5, "obj": 632145, "obj123": [11, 1218, 2652], "wall_s": 29.5}
+--- T17 T=60 ---
+portfolio {"algo": "prism", "inst": "T17", "T": 60.0, "feasible": true, "stage": 5, "obj": 77272, "obj123": [0, 6284, 392], "wall_s": 52.9}
+serial    {"algo": "prism", "inst": "T17", "T": 60.0, "feasible": true, "stage": 5, "obj": 98605, "obj123": [0, 5599, 573], "wall_s": 45.3}

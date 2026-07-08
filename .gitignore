@@ -27,3 +27,5 @@ alg_tester/example/benchmark/
 # Submission build artifacts (regenerable from submission/)
 /myalgorithm.zip
 /submission_bridge.zip
+/.venv-profile/
+*.zip
