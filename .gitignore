@@ -1,5 +1,7 @@
 # Environments / deps (local only)
 .venv/
+venv/
+venv-wsl/
 .codex_deps/
 .codex_runtime39_lib/
 .conda_pkgs/
