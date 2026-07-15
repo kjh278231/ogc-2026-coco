@@ -158,35 +158,44 @@ def portfolio_solve(prob, timelimit):
                         for i in range(n)]
         with ctx.Pool(n) as pool:
             asyncs = [pool.apply_async(_worker, p) for p in payloads]
-            pending = list(asyncs)
+            pending = list(enumerate(asyncs))
+            byidx = {}
             while pending and time.time() < gather_dl:
-                for a in list(pending):
+                for i, a in list(pending):
                     if a.ready():
                         try:
-                            results.append(a.get())
+                            byidx[i] = a.get()
                         except Exception as e:             # pragma: no cover
-                            results.append({"best": None, "pool": {}, "err": repr(e)})
-                        pending.remove(a)
+                            byidx[i] = {"best": None, "pool": {}, "err": repr(e)}
+                        pending.remove((i, a))
                 if pending:
                     time.sleep(0.05)
             pool.terminate()
             pool.join()
+            # Collect in WORKER order, not completion order: the per-worker diagnostics
+            # (worker_tot / anchor_names / debug labels) index into the anchor list, so
+            # completion-order results silently misattribute worker outcomes. The solve
+            # path (best-of / union) is order-independent -- this is diagnostics-only.
+            idxs = sorted(byidx)
+            results = [byidx[i] for i in idxs]
     except Exception:                                      # pragma: no cover
+        idxs = []
         results = []
 
     if os.environ.get("PRISM_PORTF_DEBUG"):
         sys.stderr.write("[PRISM-PORTF] anchors=%d workers=%d worker_tl=%.1f build_cost=%.1f\n" % (
             len(anchors), len(results), worker_tl, build_cost))
-        for i, r in enumerate(results):
+        for i, r in zip(idxs, results):
             sys.stderr.write("[PRISM-PORTF] w%d(%s) elapsed=%.1f pool=%d tot=%s err=%s\n" % (
                 i, anchors[i][0] if i < len(anchors) else "?", r.get("elapsed", -1),
                 len(r.get("pool") or {}), r.get("tot"), r.get("err")))
 
     LAST["n_workers"] = len(results)
+    LAST["worker_idx"] = idxs
     LAST["worker_tot"] = [r.get("tot") for r in results]
     LAST["worker_pool_sizes"] = [len(r.get("pool") or {}) for r in results]
     LAST["worker_err"] = [r.get("err") for r in results]
-    LAST["anchor_names"] = [anchors[i][0] for i in range(min(n, len(anchors)))]
+    LAST["anchor_names"] = [anchors[i][0] for i in idxs]
 
     if not any(r.get("best") is not None for r in results):
         LAST["mode"] = "serial_fallback_no_worker"
