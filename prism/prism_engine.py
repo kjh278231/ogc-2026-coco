@@ -182,7 +182,7 @@ def _anchors(prob, mip_tl, want_mip=True):
     return anchors
 
 
-def _refine(prob, anchor, cache, dl, L, rng=None):
+def _refine(prob, anchor, cache, dl, L, rng=None, seed=None):
     """Refine one anchor into a Z1=0 basin, using the FULL budget `dl`.
 
     A single LAHC descent plateaus (`_climb_lahc` breaks on a no-improve sweep) long
@@ -224,21 +224,39 @@ def _refine(prob, anchor, cache, dl, L, rng=None):
     # Runs after each swap plateau, guarded (Pareto-safe). Gives PRISM WEAVE's Z1=0 reachability
     # while keeping PRISM's anchor diversity (which beat WEAVE on some instances, e.g. T14/T18).
     _eject = K._env_flag("SOLVER_EJECTION") and hasattr(K, "_ejection_refine")
+    # Fresh-restart diversity (PRISM_REFINE_DIVERSE, default OFF -> the ILS loop below is
+    # bit-identical to today). Port of bridge/solver.py's SOLVER_LAHC_DIVERSE (~1134-1166)
+    # to _refine's simpler descent->swap->eject->ILS loop shape: instead of EVERY ILS step
+    # kicking the running best (2-5 block re-homes -- explores only best's neighbourhood),
+    # every PRISM_REFINE_DIVERSE_EVERY-th step (default 2 = alternate) re-descends the
+    # ORIGINAL anchor A0 from scratch with an independent shuffle seed -- reaching entirely
+    # different Z1=0 basins, not best's neighbours. best keeps the running min the same way
+    # on both branches, so this is Pareto-safe (adds candidates, replaces nothing).
+    _diverse = _env_flag("PRISM_REFINE_DIVERSE")
+    _diverse_every = max(1, int(os.environ.get("PRISM_REFINE_DIVERSE_EVERY", "2")))
+    _dseed = seed if seed is not None else int(os.environ.get("SOLVER_SEED", "20260629"))
     best, best_tot = K._climb_lahc(prob, A0, cache, dl, L, rng=rng)
     if _swap:
         best, best_tot = K._z3_refine(prob, best, cache, dl)
     if _eject:
         best, best_tot = K._ejection_refine(prob, best, cache, dl)
     # ILS loop: spend the rest of the budget instead of idling after the first plateau.
+    _it = 0
     while K._within(dl):
-        cand = K._perturb(prob, best, cache, rng)
-        cur, tot = K._climb_lahc(prob, cand, cache, dl, L, rng=rng)
+        if _diverse and (_it % _diverse_every) == (_diverse_every - 1):
+            wrng = random.Random(_dseed * 1000003 + _it)
+            cand = dict(A0)
+            cur, tot = K._climb_lahc(prob, cand, cache, dl, L, rng=wrng)
+        else:
+            cand = K._perturb(prob, best, cache, rng)
+            cur, tot = K._climb_lahc(prob, cand, cache, dl, L, rng=rng)
         if _swap:
             cur, tot = K._z3_refine(prob, cur, cache, dl)
         if _eject:
             cur, tot = K._ejection_refine(prob, cur, cache, dl)
         if tot < best_tot - 1e-9:
             best, best_tot = cur, tot
+        _it += 1
     return best, best_tot
 
 
@@ -258,7 +276,10 @@ def refine_anchor(prob, anchor, timelimit, L=1, eval_limit=None, seed=None):
     else:
         dl = time.time() + max(0.5, timelimit)
     rng = random.Random(seed) if seed is not None else None
-    A, tot = _refine(prob, anchor, cache, dl, L, rng=rng)
+    # `seed` is threaded through directly (not derived via rng.randrange()): consuming the
+    # outer rng stream here would subtly shift the kick trajectories between gate off/on,
+    # breaking the "gate off = bit-identical" guarantee.
+    A, tot = _refine(prob, anchor, cache, dl, L, rng=rng, seed=seed)
     return A, dict(K._POOL), tot
 
 

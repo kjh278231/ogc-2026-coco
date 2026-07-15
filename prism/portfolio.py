@@ -31,15 +31,52 @@ _WORKER_FIXED = {
     "OPENBLAS_NUM_THREADS": "1", "NUMBA_NUM_THREADS": "1",
 }
 
+# Per-worker axis diversity, ADDITIONAL to anchor choice (env-gated by
+# PRISM_PORTF_DIVERSE_AXES, default OFF -> today's behaviour is bit-identical). Keyed
+# by WORKER POSITION i (0..3), NOT anchor name -- degrades gracefully when _HAS_GUROBI
+# is False (3 heuristic anchors, row 3 unused) or PRISM_HEUR_ANCHORS/PRISM_LAMBDAS
+# reshapes the spectrum (whatever anchor lands at position i gets row i's axis).
+#   w0 pref     -- BASELINE, unchanged (Pareto-safety anchor)
+#   w1 balanced -- LAHC L=30 (bridge/portfolio.py:54: "uphill subset T6/T17/T18")
+#   w2 capped   -- fresh-restart diversity (closes the T18 coverage-gap mechanism)
+#   w3 mip16    -- search-time mask R=16 (R-sweep: wins fine-geometry T3/T6)
+_WORKER_AXES = [
+    {},
+    {"L": 30},
+    {"PRISM_REFINE_DIVERSE": "1"},
+    {"SOLVER_MASK_SEARCH_R": "16"},
+]
 
-def _worker(prob, anchor, worker_tl, L, seed):
+
+def _axis_for(i):
+    return _WORKER_AXES[i] if 0 <= i < len(_WORKER_AXES) else {}
+
+
+def _axis_L(i, default_L):
+    return _axis_for(i).get("L", default_L)
+
+
+def _axis_env(i):
+    return {k: v for k, v in _axis_for(i).items() if k != "L"}
+
+
+def _worker(prob, anchor, worker_tl, L, seed, env_over=None):
     """Spawn-safe top-level worker: refine ONE anchor with NORECOMB LAHC+ILS, return its
     assignment + column pool (for the master union-recombine). `seed` gives each worker a
-    distinct ILS/mover-shuffle trajectory (restart diversity)."""
+    distinct ILS/mover-shuffle trajectory (restart diversity). `env_over` (non-None only
+    when PRISM_PORTF_DIVERSE_AXES is on): this worker's extra axis overrides
+    (SOLVER_MASK_SEARCH_R, PRISM_REFINE_DIVERSE). It MUST be applied before `import
+    prism_engine` -- bridge/packing.py's _MASK_R_SEARCH is a module global frozen when
+    packing is first imported in this process, so env changes after that import are void.
+    Every worker is a freshly spawned process (not forked), so this point is always
+    before that import."""
     if _HERE not in sys.path:
         sys.path.insert(0, _HERE)
     for k, v in _WORKER_FIXED.items():
         os.environ[k] = v
+    if env_over:
+        for k, v in env_over.items():
+            os.environ[k] = v
     import prism_engine as P
     t = time.time()
     try:
@@ -106,11 +143,19 @@ def portfolio_solve(prob, timelimit):
     worker_tl = max(5.0, gather_dl - time.time() - collect_margin)
 
     n = min(len(anchors), int(os.environ.get("PRISM_PORTFOLIO_WORKERS", str(len(anchors)))))
+    diverse_axes = P._env_flag("PRISM_PORTF_DIVERSE_AXES", False)
+    LAST["diverse_axes"] = diverse_axes
     results = []
     try:
         import multiprocessing as mp
         ctx = mp.get_context("spawn")
-        payloads = [(prob, anchors[i][1], worker_tl, L, 20260629 + 1000 * i) for i in range(n)]
+        if diverse_axes:
+            payloads = [(prob, anchors[i][1], worker_tl, _axis_L(i, L),
+                         20260629 + 1000 * i, _axis_env(i)) for i in range(n)]
+            LAST["worker_axes"] = [_axis_for(i) for i in range(n)]
+        else:
+            payloads = [(prob, anchors[i][1], worker_tl, L, 20260629 + 1000 * i)
+                        for i in range(n)]
         with ctx.Pool(n) as pool:
             asyncs = [pool.apply_async(_worker, p) for p in payloads]
             pending = list(asyncs)
